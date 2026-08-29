@@ -1,0 +1,198 @@
+/* =======================================================================
+ * aizen-container-queries.css — Responsive panel adaptation via
+ * CSS Container Queries.
+ *
+ * Container queries let panels adapt to their OWN size rather than
+ * the viewport. This is critical for a resizable IDE layout where
+ * the chat pane, right rail, and sidebar all need independent
+ * responsive behavior.
+ *
+ * Part of Phase 3: UI/UX Optimization.
+ * ======================================================================= */
+
+/* ---- Container declarations ----
+ * Mark panels as containment contexts so children can query them. */
+
+.aizen-container-chat {
+  container-name: chat;
+  container-type: inline-size;
+}
+
+.aizen-container-sidebar {
+  container-name: sidebar;
+  container-type: inline-size;
+}
+
+.aizen-container-rail {
+  container-name: rail;
+  container-type: inline-size;
+}
+
+.aizen-container-terminal {
+  container-name: terminal;
+  container-type: inline-size;
+}
+
+.aizen-container-card {
+  container-name: card;
+  container-type: inline-size;
+}
+
+/* ---- Chat pane adaptations ---- */
+
+/* Narrow chat (< 480px): stack composer vertically, reduce padding */
+@container chat (max-width: 480px) {
+  .aizen-chat-composer {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .aizen-chat-composer .aizen-composer-actions {
+    justify-content: flex-end;
+    width: 100%;
+  }
+
+  .aizen-chat-message {
+    max-width: 95%;
+    padding: 8px 12px;
+  }
+
+  .aizen-chat-avatar {
+    width: 24px;
+    height: 24px;
+  }
+}
+
+/* Medium chat (480px - 768px): balanced layout */
+@container chat (min-width: 480px) and (max-width: 768px) {
+  .aizen-chat-message {
+    max-width: 85%;
+  }
+}
+
+/* Wide chat (> 768px): cap content width for readability */
+@container chat (min-width: 768px) {
+  .aizen-chat-content {
+    max-width: 48rem;
+    margin-inline: auto;
+  }
+}
+
+/* ---- Sidebar adaptations ---- */
+
+/* Collapsed sidebar (< 180px): icon-only mode */
+@container sidebar (max-width: 180px) {
+  .aizen-sidebar-label {
+    display: none;
+  }
+
+  .aizen-sidebar-item {
+    justify-content: center;
+    padding: 8px;
+  }
+
+  .aizen-sidebar-section-title {
+    display: none;
+  }
+}
+
+/* Full sidebar (> 200px): show labels */
+@container sidebar (min-width: 200px) {
+  .aizen-sidebar-item {
+    gap: 10px;
+    padding: 6px 12px;
+  }
+}
+
+/* ---- Right rail adaptations ---- */
+
+/* Narrow rail (< 350px): stack tabs vertically, shrink previews */
+@container rail (max-width: 350px) {
+  .aizen-rail-tabs {
+    font-size: 12px;
+  }
+
+  .aizen-rail-tabs .aizen-tab {
+    padding: 8px 10px;
+  }
+
+  .aizen-code-preview {
+    font-size: 11px;
+    line-height: 1.4;
+  }
+}
+
+/* Wide rail (> 500px): show side-by-side diff */
+@container rail (min-width: 500px) {
+  .aizen-diff-split {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1px;
+  }
+}
+
+/* ---- Terminal adaptations ---- */
+
+/* Short terminal (< 200px height): hide toolbar, compact output */
+@container terminal (max-height: 200px) {
+  .aizen-terminal-toolbar {
+    height: 28px;
+    padding: 0 8px;
+  }
+
+  .aizen-terminal-toolbar .aizen-toolbar-label {
+    display: none;
+  }
+}
+
+/* ---- Card adaptations ---- */
+
+/* Small card (< 300px): vertical layout */
+@container card (max-width: 300px) {
+  .aizen-card-header {
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .aizen-card-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .aizen-metric-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Large card (> 500px): horizontal layout with more detail */
+@container card (min-width: 500px) {
+  .aizen-metric-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+/* ---- Tool output adaptations ---- */
+
+/* Narrow tool output: full-width, no side padding */
+@container chat (max-width: 600px) {
+  .aizen-tool-output {
+    margin-inline: -12px;
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+  }
+}
+
+/* ---- Responsive typography ---- */
+
+@container chat (max-width: 480px) {
+  .aizen-heading-1 { font-size: 1.25rem; }
+  .aizen-heading-2 { font-size: 1.1rem; }
+  .aizen-body { font-size: 0.875rem; }
+}
+
+@container chat (min-width: 768px) {
+  .aizen-heading-1 { font-size: 1.5rem; }
+  .aizen-heading-2 { font-size: 1.25rem; }
+  .aizen-body { font-size: 0.9375rem; }
+}
