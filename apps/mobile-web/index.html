@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#0B0D10">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Hermes Agent — Aizen Version</title>
+  <meta name="description" content="Mobile control panel for Hermes Agent — Aizen Version">
+  <link rel="manifest" href="manifest.json">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg-void: #0B0D10;
+      --bg-surface: #12151A;
+      --bg-elevated: #1A1D24;
+      --bg-input: #1E2128;
+      --text-primary: #E4E4E7;
+      --text-secondary: #A1A1AA;
+      --text-tertiary: #71717A;
+      --text-ghost: #52525B;
+      --stroke-default: rgba(255, 255, 255, 0.06);
+      --stroke-hover: rgba(255, 255, 255, 0.10);
+      --accent: #6366F1;
+      --accent-hover: #818CF8;
+      --accent-muted: rgba(99, 102, 241, 0.15);
+      --gold: #C9A84C;
+      --success: #22C55E;
+      --warning: #EAB308;
+      --destructive: #EF4444;
+      --radius: 12px;
+      --font: 'Inter', system-ui, -apple-system, sans-serif;
+      --mono: 'JetBrains Mono', monospace;
+    }
+
+    body {
+      font-family: var(--font);
+      background: var(--bg-void);
+      color: var(--text-primary);
+      min-height: 100vh;
+      min-height: 100dvh;
+      -webkit-font-smoothing: antialiased;
+      overscroll-behavior: none;
+    }
+
+    /* ===== PIN SCREEN ===== */
+    #pin-screen {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      min-height: 100dvh;
+      padding: 24px;
+      gap: 32px;
+    }
+
+    .avatar-ring {
+      width: 96px; height: 96px;
+      border-radius: 50%;
+      overflow: hidden;
+      border: 2px solid rgba(99, 102, 241, 0.3);
+      box-shadow: 0 0 30px rgba(99, 102, 241, 0.1);
+      animation: pulse-glow 3s ease-in-out infinite;
+    }
+
+    @keyframes pulse-glow {
+      0%, 100% { box-shadow: 0 0 20px rgba(99, 102, 241, 0.1); }
+      50% { box-shadow: 0 0 40px rgba(99, 102, 241, 0.2); }
+    }
+
+    .avatar-ring img {
+      width: 100%; height: 100%;
+      object-fit: cover;
+    }
+
+    .title { font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
+    .subtitle { font-size: 13px; font-weight: 300; font-style: italic; color: var(--accent); }
+
+    .pin-dots {
+      display: flex; gap: 12px;
+      margin: 8px 0;
+    }
+
+    .pin-dot {
+      width: 14px; height: 14px;
+      border-radius: 50%;
+      border: 1.5px solid var(--text-ghost);
+      transition: all 200ms ease-out;
+    }
+
+    .pin-dot.filled {
+      background: var(--accent);
+      border-color: var(--accent);
+      transform: scale(1.1);
+    }
+
+    .pin-dot.error {
+      background: var(--destructive);
+      border-color: var(--destructive);
+      animation: shake 300ms ease;
+    }
+
+    @keyframes shake {
+      0%, 100% { transform: translateX(0); }
+      25% { transform: translateX(-4px); }
+      75% { transform: translateX(4px); }
+    }
+
+    .keypad {
+      display: grid;
+      grid-template-columns: repeat(3, 72px);
+      gap: 12px;
+    }
+
+    .key {
+      width: 72px; height: 56px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 22px; font-weight: 500;
+      background: var(--bg-surface);
+      border: 1px solid var(--stroke-default);
+      border-radius: var(--radius);
+      color: var(--text-primary);
+      cursor: pointer;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+      transition: transform 100ms ease, background 150ms ease;
+    }
+
+    .key:active {
+      transform: scale(0.95);
+      background: var(--bg-elevated);
+    }
+
+    .key.action {
+      font-size: 14px;
+      color: var(--text-tertiary);
+      background: transparent;
+      border: none;
+    }
+
+    .pin-error-msg {
+      font-size: 13px;
+      color: var(--destructive);
+      height: 20px;
+      transition: opacity 200ms;
+    }
+
+    /* ===== DASHBOARD ===== */
+    #dashboard { display: none; }
+
+    .dashboard-header {
+      display: flex;
+      align-items: center;
+      padding: 16px 20px;
+      gap: 12px;
+      border-bottom: 1px solid var(--stroke-default);
+    }
+
+    .dashboard-header .avatar-sm {
+      width: 32px; height: 32px;
+      border-radius: 50%;
+      overflow: hidden;
+    }
+
+    .dashboard-header .avatar-sm img { width: 100%; height: 100%; object-fit: cover; }
+    .dashboard-header h1 { font-size: 16px; font-weight: 600; flex: 1; }
+
+    .status-badge {
+      font-size: 11px;
+      padding: 4px 10px;
+      border-radius: 100px;
+      font-weight: 500;
+    }
+
+    .status-badge.online {
+      background: rgba(34, 197, 94, 0.15);
+      color: var(--success);
+    }
+
+    .nav-tabs {
+      display: flex;
+      border-bottom: 1px solid var(--stroke-default);
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .nav-tab {
+      flex: 1;
+      padding: 14px 16px;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-tertiary);
+      text-align: center;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: color 150ms, border-color 150ms;
+      white-space: nowrap;
+    }
+
+    .nav-tab.active {
+      color: var(--text-primary);
+      border-bottom-color: var(--accent);
+    }
+
+    .tab-content { padding: 20px; }
+
+    .metric-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+    }
+
+    .metric-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--stroke-default);
+      border-radius: var(--radius);
+      padding: 16px;
+    }
+
+    .metric-label { font-size: 11px; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.05em; }
+    .metric-value { font-size: 24px; font-weight: 600; margin-top: 4px; }
+    .metric-value.accent { color: var(--accent); }
+    .metric-value.gold { color: var(--gold); }
+    .metric-value.success { color: var(--success); }
+
+    /* Chat tab */
+    .chat-container {
+      display: flex;
+      flex-direction: column;
+      height: calc(100vh - 120px);
+      height: calc(100dvh - 120px);
+    }
+
+    .chat-messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .msg {
+      max-width: 85%;
+      padding: 10px 14px;
+      border-radius: var(--radius);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .msg.user {
+      align-self: flex-end;
+      background: var(--accent-muted);
+      border: 1px solid rgba(99, 102, 241, 0.2);
+    }
+
+    .msg.agent {
+      align-self: flex-start;
+      background: var(--bg-surface);
+      border: 1px solid var(--stroke-default);
+    }
+
+    .chat-input-area {
+      display: flex;
+      gap: 8px;
+      padding: 12px 16px;
+      border-top: 1px solid var(--stroke-default);
+      background: var(--bg-void);
+    }
+
+    .chat-input {
+      flex: 1;
+      padding: 12px 16px;
+      background: var(--bg-input);
+      border: 1px solid var(--stroke-default);
+      border-radius: var(--radius);
+      color: var(--text-primary);
+      font-family: var(--font);
+      font-size: 14px;
+      outline: none;
+      resize: none;
+    }
+
+    .chat-input:focus { border-color: var(--accent); }
+
+    .send-btn {
+      width: 44px; height: 44px;
+      display: flex; align-items: center; justify-content: center;
+      background: var(--accent);
+      border: none;
+      border-radius: var(--radius);
+      color: white;
+      cursor: pointer;
+      transition: transform 100ms;
+    }
+
+    .send-btn:active { transform: scale(0.95); }
+
+    /* Terminal tab */
+    .terminal-output {
+      background: var(--bg-surface);
+      border: 1px solid var(--stroke-default);
+      border-radius: var(--radius);
+      padding: 16px;
+      font-family: var(--mono);
+      font-size: 12px;
+      line-height: 1.6;
+      color: var(--text-secondary);
+      min-height: 300px;
+      overflow: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      * { animation: none !important; transition-duration: 0.01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <!-- PIN ENTRY SCREEN -->
+  <div id="pin-screen">
+    <div class="avatar-ring">
+      <img src="/aizen-avatar.jpg" alt="Aizen">
+    </div>
+    <div style="text-align: center">
+      <h1 class="title">Hermes Agent</h1>
+      <p class="subtitle">— Aizen Version</p>
+    </div>
+    <div class="pin-dots" id="pin-dots">
+      <div class="pin-dot"></div>
+      <div class="pin-dot"></div>
+      <div class="pin-dot"></div>
+      <div class="pin-dot"></div>
+      <div class="pin-dot"></div>
+      <div class="pin-dot"></div>
+    </div>
+    <p class="pin-error-msg" id="pin-error">&nbsp;</p>
+    <div class="keypad" id="keypad">
+      <button class="key" data-key="1">1</button>
+      <button class="key" data-key="2">2</button>
+      <button class="key" data-key="3">3</button>
+      <button class="key" data-key="4">4</button>
+      <button class="key" data-key="5">5</button>
+      <button class="key" data-key="6">6</button>
+      <button class="key" data-key="7">7</button>
+      <button class="key" data-key="8">8</button>
+      <button class="key" data-key="9">9</button>
+      <button class="key action" data-key="clear">Clear</button>
+      <button class="key" data-key="0">0</button>
+      <button class="key action" data-key="back">←</button>
+    </div>
+  </div>
+
+  <!-- DASHBOARD (shown after auth) -->
+  <div id="dashboard">
+    <header class="dashboard-header">
+      <div class="avatar-sm"><img src="/aizen-avatar.jpg" alt=""></div>
+      <h1>Hermes Agent</h1>
+      <span class="status-badge online" id="status-badge">Online</span>
+    </header>
+    <nav class="nav-tabs">
+      <div class="nav-tab active" data-tab="status">Status</div>
+      <div class="nav-tab" data-tab="chat">Chat</div>
+      <div class="nav-tab" data-tab="terminal">Terminal</div>
+      <div class="nav-tab" data-tab="files">Files</div>
+    </nav>
+    <div class="tab-content" id="tab-content">
+      <!-- Status tab (default) -->
+      <div id="tab-status">
+        <div class="metric-grid">
+          <div class="metric-card">
+            <div class="metric-label">Model</div>
+            <div class="metric-value accent" id="m-model">—</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">Sessions</div>
+            <div class="metric-value" id="m-sessions">0</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">Tokens Used</div>
+            <div class="metric-value gold" id="m-tokens">—</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">Uptime</div>
+            <div class="metric-value success" id="m-uptime">—</div>
+          </div>
+        </div>
+      </div>
+      <!-- Chat tab -->
+      <div id="tab-chat" style="display:none">
+        <div class="chat-container">
+          <div class="chat-messages" id="chat-messages"></div>
+          <div class="chat-input-area">
+            <textarea class="chat-input" id="chat-input" placeholder="Message..." rows="1"></textarea>
+            <button class="send-btn" id="send-btn">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="22" y1="2" x2="11" y2="13"></line>
+                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+      <!-- Terminal tab -->
+      <div id="tab-terminal" style="display:none">
+        <div class="terminal-output" id="terminal-output">$ Waiting for connection...</div>
+      </div>
+      <!-- Files tab -->
+      <div id="tab-files" style="display:none">
+        <p style="color: var(--text-tertiary); font-size: 14px;">File browser coming soon.</p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ===== PIN ENTRY LOGIC =====
+    const pinScreen = document.getElementById('pin-screen')
+    const dashboard = document.getElementById('dashboard')
+    const dots = document.querySelectorAll('.pin-dot')
+    const errorMsg = document.getElementById('pin-error')
+    let pin = ''
+    let token = ''
+
+    function updateDots() {
+      dots.forEach((d, i) => {
+        d.classList.toggle('filled', i < pin.length)
+        d.classList.remove('error')
+      })
+    }
+
+    function showError(msg) {
+      errorMsg.textContent = msg
+      dots.forEach(d => d.classList.add('error'))
+      pin = ''
+      setTimeout(() => {
+        dots.forEach(d => d.classList.remove('error'))
+        updateDots()
+        errorMsg.innerHTML = '&nbsp;'
+      }, 1500)
+    }
+
+    async function submitPin() {
+      try {
+        const res = await fetch('/api/mobile/auth', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pin }),
+        })
+        if (res.ok) {
+          const data = await res.json()
+          token = data.token
+          sessionStorage.setItem('hermes-mobile-token', token)
+          pinScreen.style.display = 'none'
+          dashboard.style.display = 'block'
+          loadStatus()
+        } else {
+          showError('Invalid PIN')
+        }
+      } catch {
+        showError('Connection failed')
+      }
+    }
+
+    document.getElementById('keypad').addEventListener('click', e => {
+      const key = e.target.dataset.key
+      if (!key) return
+      if (key === 'clear') { pin = ''; updateDots(); return }
+      if (key === 'back') { pin = pin.slice(0, -1); updateDots(); return }
+      if (pin.length >= 6) return
+      pin += key
+      updateDots()
+      if (pin.length === 6) setTimeout(submitPin, 200)
+    })
+
+    // ===== TAB NAVIGATION =====
+    document.querySelectorAll('.nav-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'))
+        tab.classList.add('active')
+        document.querySelectorAll('[id^="tab-"]').forEach(c => c.style.display = 'none')
+        const target = document.getElementById('tab-' + tab.dataset.tab)
+        if (target) target.style.display = ''
+      })
+    })
+
+    // ===== STATUS LOADING =====
+    async function loadStatus() {
+      try {
+        const res = await fetch('/api/mobile/status', {
+          headers: { Authorization: 'Bearer ' + token },
+        })
+        if (res.ok) {
+          const data = await res.json()
+          document.getElementById('m-model').textContent = data.model || '—'
+          document.getElementById('m-sessions').textContent = data.sessions || '0'
+          document.getElementById('m-tokens').textContent = data.tokens || '—'
+          document.getElementById('m-uptime').textContent = data.uptime || '—'
+        }
+      } catch {}
+    }
+
+    // ===== CHAT =====
+    const chatInput = document.getElementById('chat-input')
+    const chatMessages = document.getElementById('chat-messages')
+
+    document.getElementById('send-btn').addEventListener('click', sendMessage)
+    chatInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage() }
+    })
+
+    async function sendMessage() {
+      const text = chatInput.value.trim()
+      if (!text) return
+      addMessage(text, 'user')
+      chatInput.value = ''
+      try {
+        const res = await fetch('/api/mobile/chat', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: 'Bearer ' + token,
+          },
+          body: JSON.stringify({ message: text }),
+        })
+        if (res.ok) {
+          const data = await res.json()
+          addMessage(data.response || 'No response', 'agent')
+        }
+      } catch {
+        addMessage('Connection error', 'agent')
+      }
+    }
+
+    function addMessage(text, type) {
+      const div = document.createElement('div')
+      div.className = 'msg ' + type
+      div.textContent = text
+      chatMessages.appendChild(div)
+      chatMessages.scrollTop = chatMessages.scrollHeight
+    }
+
+    // Check for existing session
+    const savedToken = sessionStorage.getItem('hermes-mobile-token')
+    if (savedToken) {
+      token = savedToken
+      pinScreen.style.display = 'none'
+      dashboard.style.display = 'block'
+      loadStatus()
+    }
+  </script>
+</body>
+</html>

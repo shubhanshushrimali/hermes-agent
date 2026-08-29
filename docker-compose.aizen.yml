@@ -1,0 +1,46 @@
+# Hermes Agent — Aizen Version: Enhanced Docker Compose
+# Adds code-server, Caddy reverse proxy, and mobile PWA
+# Usage: docker compose -f docker-compose.yml -f docker-compose.aizen.yml up
+
+services:
+  # Full VS Code in the browser via code-server
+  code-server:
+    image: codercom/code-server:latest
+    container_name: hermes-code-server
+    restart: unless-stopped
+    ports:
+      - "8443:8080"
+    volumes:
+      - ./workspace:/home/coder/project
+      - code-server-data:/home/coder/.local
+    environment:
+      - PASSWORD=${CODE_SERVER_PASSWORD:-hermes}
+      - SUDO_PASSWORD=${CODE_SERVER_SUDO_PASSWORD:-hermes}
+    networks:
+      - hermes-net
+
+  # Caddy reverse proxy — automatic HTTPS + mobile PWA serving
+  caddy:
+    image: caddy:latest
+    container_name: hermes-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile.aizen:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+      - ./apps/mobile-web:/srv/mobile:ro
+      - ./apps/desktop/public/aizen-avatar.jpg:/srv/mobile/aizen-avatar.jpg:ro
+    networks:
+      - hermes-net
+
+volumes:
+  code-server-data:
+  caddy-data:
+  caddy-config:
+
+networks:
+  hermes-net:
+    driver: bridge
