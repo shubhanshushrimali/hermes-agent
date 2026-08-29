@@ -809,6 +809,75 @@ export const cyberpunkTheme: DesktopTheme = {
   }
 }
 
+/**
+ * Aizen — the "Hermes Agent — Aizen Version" identity.
+ *
+ * A refined dark theme with subtle indigo accent and muted gold highlights.
+ * Deliberately NOT flashy or purple-heavy — calm, professional, and elegant
+ * like Aizen's demeanor. Gold appears sparingly for authority/achievements.
+ *
+ * "Since when were you under the impression that this was an ordinary theme?"
+ */
+export const aizenTheme: DesktopTheme = {
+  name: 'aizen',
+  label: 'Aizen',
+  description: 'Refined dark — indigo accent, muted gold highlights',
+  colors: {
+    background: '#0B0D10',
+    foreground: '#E4E4E7',
+    card: '#12151A',
+    cardForeground: '#E4E4E7',
+    muted: '#1A1D24',
+    mutedForeground: '#A1A1AA',
+    popover: '#14171D',
+    popoverForeground: '#E4E4E7',
+    primary: '#6366F1',
+    primaryForeground: '#ffffff',
+    secondary: '#1E2030',
+    secondaryForeground: '#C4C4CC',
+    accent: '#1C1E2E',
+    accentForeground: '#C4C4CC',
+    border: '#23262F',
+    input: '#1A1D24',
+    ring: '#6366F1',
+    midground: '#6366F1',
+    midgroundForeground: '#ffffff',
+    composerRing: '#6366F1',
+    destructive: '#EF4444',
+    destructiveForeground: '#ffffff',
+    sidebarBackground: '#090B0E',
+    sidebarBorder: '#1E2128',
+    userBubble: '#171A22',
+    userBubbleBorder: '#282D3A'
+  },
+  typography: {
+    fontSans: `Inter, ${SYSTEM_SANS}`,
+    fontMono: `"JetBrains Mono", ${SYSTEM_MONO}`,
+    fontUrl: 'https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap'
+  },
+  terminal: {
+    foreground: '#E4E4E7',
+    cursor: '#6366F1',
+    selectionBackground: 'rgba(99, 102, 241, 0.3)',
+    black: '#1A1D24',
+    red: '#EF4444',
+    green: '#22C55E',
+    yellow: '#EAB308',
+    blue: '#6366F1',
+    magenta: '#A78BFA',
+    cyan: '#22D3EE',
+    white: '#E4E4E7',
+    brightBlack: '#52525B',
+    brightRed: '#F87171',
+    brightGreen: '#4ADE80',
+    brightYellow: '#FACC15',
+    brightBlue: '#818CF8',
+    brightMagenta: '#C4B5FD',
+    brightCyan: '#67E8F9',
+    brightWhite: '#FAFAFA'
+  }
+}
+
 /** Cool slate blue for developers. Matches the CLI slate skin. */
 export const slateTheme: DesktopTheme = {
   name: 'slate',
@@ -856,10 +925,11 @@ export const BUILTIN_THEMES: Record<string, DesktopTheme> = {
   ember: emberTheme,
   mono: monoTheme,
   slate: slateTheme,
-  cyberpunk: cyberpunkTheme
+  cyberpunk: cyberpunkTheme,
+  aizen: aizenTheme
 }
 
 export const BUILTIN_THEME_LIST = Object.values(BUILTIN_THEMES)
 
 /** Skin used when nothing is persisted or the persisted name is retired. */
-export const DEFAULT_SKIN_NAME = 'nous'
+export const DEFAULT_SKIN_NAME = 'aizen'
