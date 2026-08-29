@@ -1,0 +1,43 @@
+# Caddyfile for Hermes Agent — Aizen Version
+# Serves the mobile PWA and proxies to the gateway and code-server
+
+{
+	admin off
+}
+
+# Mobile PWA + Gateway proxy
+:80, :443 {
+	# Mobile PWA
+	handle /mobile* {
+		root * /srv/mobile
+		file_server
+		try_files {path} /index.html
+	}
+
+	# Aizen avatar (shared between mobile PWA and desktop)
+	handle /aizen-avatar.jpg {
+		root * /srv/mobile
+		file_server
+	}
+
+	# Gateway API proxy
+	handle /api/* {
+		reverse_proxy hermes-agent:8080
+	}
+
+	# WebSocket proxy for streaming
+	handle /ws/* {
+		reverse_proxy hermes-agent:8080
+	}
+
+	# code-server proxy
+	handle /code/* {
+		uri strip_prefix /code
+		reverse_proxy code-server:8080
+	}
+
+	# Default: gateway
+	handle {
+		reverse_proxy hermes-agent:8080
+	}
+}
