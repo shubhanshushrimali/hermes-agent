@@ -1,0 +1,21 @@
+{
+  "name": "Hermes Agent — Aizen Version",
+  "short_name": "Hermes Aizen",
+  "description": "Mobile control panel for Hermes Agent",
+  "start_url": "/",
+  "display": "standalone",
+  "theme_color": "#0B0D10",
+  "background_color": "#0B0D10",
+  "icons": [
+    {
+      "src": "/aizen-avatar.jpg",
+      "sizes": "192x192",
+      "type": "image/jpeg"
+    },
+    {
+      "src": "/aizen-avatar.jpg",
+      "sizes": "512x512",
+      "type": "image/jpeg"
+    }
+  ]
+}
