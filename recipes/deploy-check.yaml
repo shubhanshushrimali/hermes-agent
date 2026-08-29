@@ -1,0 +1,43 @@
+name: deploy-check
+description: Pre-deploy verification — tests, lint, build, and final review
+author: Aizen
+version: "1.0"
+tags: [deploy, ci, quality]
+
+steps:
+  - action: shell
+    command: npm run lint 2>&1 || true
+    output: lint_output
+
+  - action: shell
+    command: npm run test -- --reporter=dot 2>&1 || true
+    output: test_output
+
+  - action: shell
+    command: npm run build 2>&1 || true
+    output: build_output
+
+  - action: agent
+    prompt: |
+      Pre-deploy verification results:
+
+      ## Lint Output
+      {{ lint_output }}
+
+      ## Test Output
+      {{ test_output }}
+
+      ## Build Output
+      {{ build_output }}
+
+      Assess whether this is safe to deploy.
+      Report any failing tests, lint errors, or build warnings.
+      Give a clear GO / NO-GO recommendation.
+    output: deploy_assessment
+
+  - action: mcp_app
+    app: metrics-dashboard
+    data:
+      Lint: "{{ lint_output }}"
+      Tests: "{{ test_output }}"
+      Build: "{{ build_output }}"

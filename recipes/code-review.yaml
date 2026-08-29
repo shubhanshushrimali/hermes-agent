@@ -1,0 +1,42 @@
+name: code-review
+description: Run comprehensive code review on staged changes
+author: Aizen
+version: "1.0"
+tags: [review, quality, git]
+
+steps:
+  - action: shell
+    command: git diff --staged --stat
+    output: diff_stats
+
+  - action: shell
+    command: git diff --staged
+    output: diff_output
+
+  - action: agent
+    prompt: |
+      You are a senior code reviewer. Review this diff carefully for:
+
+      1. **Bugs & Logic Errors** — off-by-one, null checks, race conditions
+      2. **Security Issues** — injection, hardcoded secrets, input validation
+      3. **Performance** — N+1 queries, unnecessary re-renders, memory leaks
+      4. **Style** — naming conventions, dead code, missing types
+      5. **Architecture** — single responsibility, proper abstractions
+
+      Stats:
+      {{ diff_stats }}
+
+      Full Diff:
+      {{ diff_output }}
+
+      Format your response as:
+      ## Summary
+      ## Critical Issues (must fix)
+      ## Suggestions (nice to have)
+      ## Approved? (yes/no with reasoning)
+    output: review_result
+
+  - action: mcp_app
+    app: diff-viewer
+    data:
+      diff: "{{ diff_output }}"

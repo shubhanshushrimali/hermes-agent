@@ -1,0 +1,175 @@
+/* =======================================================================
+ * aizen-enhancements.css — Aizen Version micro-animations & polish
+ *
+ * Layered on top of the base styles.css. All animations respect
+ * prefers-reduced-motion. Colors use the existing theme token system.
+ * ======================================================================= */
+
+/* ---- Streaming cursor: indigo block blink ---- */
+@keyframes aizen-cursor-blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+
+.aizen-streaming-cursor::after {
+  content: '';
+  display: inline-block;
+  width: 2px;
+  height: 1.1em;
+  background: var(--dt-midground, #6366F1);
+  margin-left: 1px;
+  vertical-align: text-bottom;
+  animation: aizen-cursor-blink 1s steps(1) infinite;
+}
+
+/* ---- Panel transitions ---- */
+.aizen-panel-enter {
+  animation: aizen-panel-in 200ms ease-out forwards;
+}
+
+@keyframes aizen-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ---- Button press micro-feedback ---- */
+.aizen-btn-press {
+  transition: transform 100ms ease, box-shadow 100ms ease;
+}
+
+.aizen-btn-press:active {
+  transform: scale(0.97);
+}
+
+/* ---- Glassmorphism panel (used for overlays) ---- */
+.aizen-glass {
+  background: color-mix(in srgb, var(--dt-background, #0B0D10) 80%, transparent);
+  backdrop-filter: blur(12px) saturate(120%);
+  -webkit-backdrop-filter: blur(12px) saturate(120%);
+  border: 1px solid color-mix(in srgb, var(--dt-foreground, #E4E4E7) 6%, transparent);
+}
+
+/* ---- Indigo glow on focus for inputs ---- */
+.aizen-input-glow:focus {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--dt-midground, #6366F1) 25%, transparent);
+  border-color: var(--dt-midground, #6366F1);
+  outline: none;
+}
+
+/* ---- Achievement badge gold shimmer ---- */
+@keyframes aizen-gold-shimmer {
+  0% { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+
+.aizen-achievement-glow {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(201, 168, 76, 0.15) 25%,
+    rgba(201, 168, 76, 0.30) 50%,
+    rgba(201, 168, 76, 0.15) 75%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: aizen-gold-shimmer 2s ease-in-out 1;
+}
+
+/* ---- Status dot pulse ---- */
+@keyframes aizen-status-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.aizen-status-active {
+  animation: aizen-status-pulse 2s ease-in-out infinite;
+}
+
+/* ---- Sidebar item hover ---- */
+.aizen-sidebar-item {
+  transition: background 150ms ease, transform 100ms ease;
+}
+
+.aizen-sidebar-item:hover {
+  background: color-mix(in srgb, var(--dt-midground, #6366F1) 8%, transparent);
+}
+
+/* ---- Code diff highlights ---- */
+.aizen-diff-add {
+  background: color-mix(in srgb, #22C55E 10%, transparent);
+  border-left: 2px solid #22C55E;
+}
+
+.aizen-diff-remove {
+  background: color-mix(in srgb, #EF4444 10%, transparent);
+  border-left: 2px solid #EF4444;
+}
+
+/* ---- Toast entry animation ---- */
+@keyframes aizen-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.aizen-toast {
+  animation: aizen-toast-in 250ms ease-out forwards;
+}
+
+/* ---- Composer ring glow when agent is streaming ---- */
+@keyframes aizen-composer-glow {
+  0%, 100% {
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--dt-midground, #6366F1) 30%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 12px 2px color-mix(in srgb, var(--dt-midground, #6366F1) 20%, transparent);
+  }
+}
+
+.aizen-composer-streaming {
+  animation: aizen-composer-glow 1.5s ease-in-out infinite;
+}
+
+/* ---- Keyboard shortcut badge ---- */
+.aizen-kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 5px;
+  font-family: var(--dt-font-mono, 'JetBrains Mono', monospace);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--dt-muted-foreground, #A1A1AA);
+  background: color-mix(in srgb, var(--dt-foreground, #E4E4E7) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--dt-foreground, #E4E4E7) 10%, transparent);
+  border-radius: 4px;
+  line-height: 1;
+}
+
+/* ---- Respect prefers-reduced-motion ---- */
+@media (prefers-reduced-motion: reduce) {
+  .aizen-streaming-cursor::after,
+  .aizen-status-active,
+  .aizen-composer-streaming,
+  .aizen-achievement-glow {
+    animation: none !important;
+  }
+
+  .aizen-panel-enter,
+  .aizen-toast {
+    animation-duration: 0.01ms !important;
+  }
+}
