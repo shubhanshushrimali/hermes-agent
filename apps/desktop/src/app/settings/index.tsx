@@ -17,6 +17,7 @@ import {
   Info,
   Keyboard,
   KeyRound,
+  Monitor,
   Package,
   RefreshCw,
   Search,
@@ -47,6 +48,7 @@ import { SECTIONS } from './constants'
 import { GatewaySettings } from './gateway-settings'
 import { KeybindSettings } from './keybind-settings'
 import { KEYS_VIEWS, KeysSettings, type KeysView } from './keys-settings'
+import { MobileAccessSettings } from './mobile-access-settings'
 import { NotificationsSettings } from './notifications-settings'
 import { PluginsSettings } from './plugins-settings'
 import { PROVIDER_VIEWS, ProvidersSettings, type ProviderView } from './providers-settings'
@@ -63,6 +65,7 @@ const SETTINGS_VIEWS: readonly SettingsViewId[] = [
   'keybinds',
   'keys',
   'notifications',
+  'mobile',
   'billing',
   'plugins',
   'sessions',
@@ -270,6 +273,13 @@ export function SettingsView({ onClose, onConfigSaved, onMainModelChanged }: Set
         onSelect: () => setActiveView('plugins')
       },
       {
+        active: activeView === 'mobile',
+        icon: Monitor,
+        id: 'mobile',
+        label: 'Mobile Access',
+        onSelect: () => setActiveView('mobile')
+      },
+      {
         active: activeView === 'sessions',
         icon: Archive,
         id: 'sessions',
@@ -404,6 +414,8 @@ export function SettingsView({ onClose, onConfigSaved, onMainModelChanged }: Set
       <BillingSettings />
     ) : activeView === 'plugins' ? (
       <PluginsSettings />
+    ) : activeView === 'mobile' ? (
+      <MobileAccessSettings />
     ) : (
       <SessionsSettings />
     )

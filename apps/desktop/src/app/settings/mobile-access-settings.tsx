@@ -15,7 +15,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
-import { Smartphone, Shield, QrCode, Trash2, Plus, RefreshCw } from '@/lib/icons'
+import { Monitor, Lock, Network, Trash2, Plus, RefreshCw } from '@/lib/icons'
 
 import { ListRow, SectionHeading, SettingsContent, ToggleRow } from './primitives'
 
@@ -134,7 +134,7 @@ export function MobileAccessSettings() {
   return (
     <SettingsContent>
       {/* Header */}
-      <SectionHeading icon={Smartphone} title="Mobile Access" />
+      <SectionHeading icon={Monitor} title="Mobile Access" />
       <Caption className="mb-4 leading-(--conversation-caption-line-height)">
         Control Hermes Agent from your phone. Enable mobile access, create PINs
         with scoped permissions, and pair devices via QR code.
@@ -153,7 +153,7 @@ export function MobileAccessSettings() {
           {/* Connection Info */}
           <div className="mt-4 p-4 rounded-xl border border-(--ui-stroke-secondary) bg-(--ui-bg-card)">
             <div className="flex items-center gap-2 mb-2">
-              <QrCode className="w-4 h-4 text-(--ui-text-tertiary)" />
+              <Network className="w-4 h-4 text-(--ui-text-tertiary)" />
               <span className="text-sm font-medium">Connection</span>
             </div>
             <div className="grid grid-cols-2 gap-3 text-sm">
@@ -175,7 +175,7 @@ export function MobileAccessSettings() {
           <div className="mt-6">
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
-                <Shield className="w-4 h-4 text-(--ui-text-tertiary)" />
+                <Lock className="w-4 h-4 text-(--ui-text-tertiary)" />
                 <span className="text-sm font-medium">Access PINs</span>
               </div>
               <Button
