@@ -234,6 +234,13 @@ def register_aizen_extensions(app: Any, get_agent_fn: Any = None) -> None:
     # Codebase graph routes
     _register_graph_routes(app)
 
+    # Panel routes (git, crew, daemon, cost dashboard)
+    try:
+        from gateway.panel_routes import register_panel_routes
+        register_panel_routes(app)
+    except ImportError as e:
+        logger.debug("Panel routes not registered: %s", e)
+
     logger.info("All Aizen extension routes registered")
 
 
