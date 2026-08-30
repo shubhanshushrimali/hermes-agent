@@ -317,13 +317,31 @@ def node_plan(state: dict) -> dict:
 
 @observe(name="node:research")
 def node_research(state: dict) -> dict:
-    """Auto-search the web for context when the task needs it.
+    """Auto-search the web AND codebase graph for context.
 
-    Uses the existing web_search_tool from Hermes.
+    Uses:
+    1. Codebase knowledge graph (Graphify / regex) for structural context
+    2. Web search tool for external knowledge
     """
     prompt = state.get("user_prompt", "")
     context = list(state.get("research_context", []))
 
+    # --- Codebase graph context ---
+    try:
+        from gateway.codebase_graph import get_graph_manager
+        manager = get_graph_manager()
+        # Try to find a workspace path from session or default.
+        workspace = state.get("workspace_path", os.getcwd())
+        graph = manager.get_graph(workspace)
+        if graph:
+            code_context = manager.query(workspace, prompt)
+            if code_context:
+                context.append(f"Codebase graph context:\n{code_context}")
+                slog.info("graph_context_added", nodes=graph.node_count)
+    except Exception as e:
+        logger.debug("Codebase graph query failed: %s", e)
+
+    # --- Web search ---
     try:
         from tools.web_tools import web_search_tool
         results = web_search_tool(prompt, limit=3)
