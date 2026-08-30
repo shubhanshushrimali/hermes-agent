@@ -255,6 +255,34 @@ def register_aizen_extensions(app: Any, get_agent_fn: Any = None) -> None:
     except Exception:
         pass
 
+    # Print the Zanpakutō banner.
+    try:
+        from gateway.banner import print_banner
+        print_banner(compact=True)
+    except Exception:
+        pass
+
+    # Record daily streak activity.
+    try:
+        from gateway.streaks import StreakTracker
+        tracker = StreakTracker()
+        info = tracker.record_activity()
+        logger.info("Streak: %s", info.get("streak_display", ""))
+    except Exception:
+        pass
+
+    # Discover and load plugins.
+    try:
+        from gateway.plugin_system import get_plugin_registry
+        registry = get_plugin_registry()
+        plugins = registry.get_plugins()
+        if plugins:
+            logger.info("Loaded %d plugins with %d tools",
+                        len(plugins),
+                        len(registry.get_tools()))
+    except Exception:
+        pass
+
     logger.info("All Aizen extension routes registered")
 
 

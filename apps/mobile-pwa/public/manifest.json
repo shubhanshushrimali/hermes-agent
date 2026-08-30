@@ -1,0 +1,40 @@
+{
+  "name": "Hermes Agent",
+  "short_name": "Hermes",
+  "description": "Aizen-powered AI coding agent — accessible from any device",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "theme_color": "#08090C",
+  "background_color": "#08090C",
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["developer tools", "productivity"],
+  "screenshots": [],
+  "shortcuts": [
+    {
+      "name": "New Chat",
+      "short_name": "Chat",
+      "description": "Start a new agent conversation",
+      "url": "/?action=new-chat"
+    },
+    {
+      "name": "Daemon Status",
+      "short_name": "Daemon",
+      "description": "Check background agent status",
+      "url": "/?action=daemon"
+    }
+  ]
+}

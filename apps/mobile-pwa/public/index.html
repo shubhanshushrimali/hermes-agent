@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1">
+  <meta name="theme-color" content="#08090C">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="description" content="Hermes Agent — Aizen-powered AI coding agent accessible from any device">
+  <title>Hermes × Aizen</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Header -->
+    <header class="header">
+      <div class="header-left">
+        <span class="logo">⚔</span>
+        <h1 class="header-title">Hermes</h1>
+      </div>
+      <div class="header-right">
+        <button class="icon-btn" id="streak-btn" title="Streak">🔥</button>
+        <button class="icon-btn" id="settings-btn" title="Settings">⚙</button>
+      </div>
+    </header>
+
+    <!-- Streak Bar -->
+    <div class="streak-bar" id="streak-bar" style="display: none;">
+      <span class="streak-text" id="streak-text"></span>
+      <div class="streak-progress" id="streak-progress"></div>
+    </div>
+
+    <!-- Chat Area -->
+    <main class="chat-area" id="chat-area">
+      <!-- Welcome screen -->
+      <div class="welcome" id="welcome">
+        <div class="welcome-logo">⚔</div>
+        <h2 class="welcome-title">Hermes × Aizen</h2>
+        <p class="welcome-sub">Since when were you under the impression<br>that you were coding alone?</p>
+        <div class="quick-actions">
+          <button class="quick-btn" data-prompt="Review my latest commit">📝 Review Code</button>
+          <button class="quick-btn" data-prompt="What's the status of the daemon?">🤖 Daemon Status</button>
+          <button class="quick-btn" data-prompt="Show my streak stats">🔥 My Streak</button>
+          <button class="quick-btn" data-prompt="Help me debug this error">🐛 Debug Help</button>
+        </div>
+      </div>
+      <!-- Messages -->
+      <div class="messages" id="messages"></div>
+    </main>
+
+    <!-- Composer -->
+    <div class="composer">
+      <div class="composer-inner">
+        <textarea
+          id="input"
+          placeholder="Ask anything..."
+          rows="1"
+          autocomplete="off"
+          autocorrect="on"
+        ></textarea>
+        <button class="send-btn" id="send-btn" disabled>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M22 2L11 13M22 2L15 22L11 13M22 2L2 9L11 13"/>
+          </svg>
+        </button>
+      </div>
+      <div class="composer-footer">
+        <span class="model-label" id="model-label">hermes × aizen</span>
+      </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div class="modal-overlay" id="settings-modal" style="display: none;">
+      <div class="modal">
+        <div class="modal-header">
+          <h3>Settings</h3>
+          <button class="icon-btn modal-close" id="settings-close">✕</button>
+        </div>
+        <div class="modal-body">
+          <label class="setting-row">
+            <span>Server URL</span>
+            <input type="url" id="server-url" value="http://localhost:5005" class="setting-input">
+          </label>
+          <label class="setting-row">
+            <span>Model</span>
+            <select id="model-select" class="setting-input">
+              <option value="">Default</option>
+              <option value="ollama/llama3.2:3b">Ollama Llama 3.2</option>
+              <option value="anthropic/claude-sonnet">Claude Sonnet</option>
+              <option value="openai/gpt-4o">GPT-4o</option>
+            </select>
+          </label>
+          <label class="setting-row">
+            <span>Theme</span>
+            <select id="theme-select" class="setting-input">
+              <option value="dark">Dark (Obsidian)</option>
+              <option value="light">Light (Parchment)</option>
+              <option value="auto">System</option>
+            </select>
+          </label>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+  <script>
+    // Register service worker
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js');
+    }
+  </script>
+</body>
+</html>

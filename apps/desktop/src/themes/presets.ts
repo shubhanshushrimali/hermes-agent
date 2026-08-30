@@ -812,43 +812,77 @@ export const cyberpunkTheme: DesktopTheme = {
 /**
  * Aizen — the "Hermes Agent — Aizen Version" identity.
  *
- * A refined dark theme with subtle indigo accent and muted gold highlights.
- * Deliberately NOT flashy or purple-heavy — calm, professional, and elegant
- * like Aizen's demeanor. Gold appears sparingly for authority/achievements.
+ * Deep obsidian background with Zanpakutō gold (#D4A447) as the primary accent.
+ * Kyōka Suigetsu purple (#7C6BF0) for secondary/magic elements.
+ * Hogyoku teal (#22D3EE) for success states.
+ *
+ * The palette conveys authority, calm intelligence, and quiet power.
+ * Gold is used for: focus rings, active states, streaming cursors, pills.
+ * Purple is used for: selections, hover states, secondary UI.
  *
  * "Since when were you under the impression that this was an ordinary theme?"
  */
 export const aizenTheme: DesktopTheme = {
   name: 'aizen',
   label: 'Aizen',
-  description: 'Refined dark — indigo accent, muted gold highlights',
+  description: 'Obsidian and gold — the throne room of Las Noches',
   colors: {
-    background: '#0B0D10',
-    foreground: '#E4E4E7',
-    card: '#12151A',
-    cardForeground: '#E4E4E7',
-    muted: '#1A1D24',
-    mutedForeground: '#A1A1AA',
-    popover: '#14171D',
-    popoverForeground: '#E4E4E7',
-    primary: '#6366F1',
-    primaryForeground: '#ffffff',
-    secondary: '#1E2030',
-    secondaryForeground: '#C4C4CC',
-    accent: '#1C1E2E',
-    accentForeground: '#C4C4CC',
-    border: '#23262F',
-    input: '#1A1D24',
-    ring: '#6366F1',
-    midground: '#6366F1',
-    midgroundForeground: '#ffffff',
-    composerRing: '#6366F1',
+    // Light variant — warm parchment with gold accents (for daytime users)
+    background: '#FAF8F5',
+    foreground: '#1A1614',
+    card: '#F5F0EB',
+    cardForeground: '#1A1614',
+    muted: '#EDE8E1',
+    mutedForeground: '#6B6560',
+    popover: '#FFFEFA',
+    popoverForeground: '#1A1614',
+    primary: '#B8860B',
+    primaryForeground: '#FFFEFA',
+    secondary: '#F0E8DA',
+    secondaryForeground: '#3D3530',
+    accent: '#F5EEE0',
+    accentForeground: '#3D3530',
+    border: '#DDD6CB',
+    input: '#F5F0EB',
+    ring: '#B8860B',
+    midground: '#B8860B',
+    midgroundForeground: '#FFFEFA',
+    composerRing: '#B8860B',
+    destructive: '#DC2626',
+    destructiveForeground: '#FFFEFA',
+    sidebarBackground: '#F0EBE4',
+    sidebarBorder: '#DDD6CB',
+    userBubble: '#F5EEE0',
+    userBubbleBorder: '#DDD6CB'
+  },
+  darkColors: {
+    // Dark variant — obsidian throne room with Zanpakutō gold
+    background: '#08090C',
+    foreground: '#E8E6E3',
+    card: '#0E1015',
+    cardForeground: '#E8E6E3',
+    muted: '#151820',
+    mutedForeground: '#8A8680',
+    popover: '#111419',
+    popoverForeground: '#E8E6E3',
+    primary: '#D4A447',
+    primaryForeground: '#0A0A0A',
+    secondary: '#1A1520',
+    secondaryForeground: '#C9C5C0',
+    accent: '#16121E',
+    accentForeground: '#C9C5C0',
+    border: '#1E1B25',
+    input: '#111419',
+    ring: '#D4A447',
+    midground: '#D4A447',
+    midgroundForeground: '#0A0A0A',
+    composerRing: '#D4A447',
     destructive: '#EF4444',
-    destructiveForeground: '#ffffff',
-    sidebarBackground: '#090B0E',
-    sidebarBorder: '#1E2128',
-    userBubble: '#171A22',
-    userBubbleBorder: '#282D3A'
+    destructiveForeground: '#FFFEFA',
+    sidebarBackground: '#060709',
+    sidebarBorder: '#18161E',
+    userBubble: '#12101A',
+    userBubbleBorder: '#2A2535'
   },
   typography: {
     fontSans: `Inter, ${SYSTEM_SANS}`,
@@ -856,25 +890,48 @@ export const aizenTheme: DesktopTheme = {
     fontUrl: 'https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap'
   },
   terminal: {
-    foreground: '#E4E4E7',
-    cursor: '#6366F1',
-    selectionBackground: 'rgba(99, 102, 241, 0.3)',
-    black: '#1A1D24',
+    // Light terminal
+    foreground: '#1A1614',
+    cursor: '#B8860B',
+    selectionBackground: 'rgba(184, 134, 11, 0.2)',
+    black: '#1A1614',
+    red: '#DC2626',
+    green: '#15803D',
+    yellow: '#A16207',
+    blue: '#6366F1',
+    magenta: '#7C3AED',
+    cyan: '#0E7490',
+    white: '#6B6560',
+    brightBlack: '#78716C',
+    brightRed: '#EF4444',
+    brightGreen: '#16A34A',
+    brightYellow: '#CA8A04',
+    brightBlue: '#818CF8',
+    brightMagenta: '#8B5CF6',
+    brightCyan: '#06B6D4',
+    brightWhite: '#F5F0EB'
+  },
+  darkTerminal: {
+    // Dark terminal — gold cursor, Zanpakutō palette
+    foreground: '#E8E6E3',
+    cursor: '#D4A447',
+    selectionBackground: 'rgba(212, 164, 71, 0.25)',
+    black: '#151820',
     red: '#EF4444',
     green: '#22C55E',
-    yellow: '#EAB308',
-    blue: '#6366F1',
+    yellow: '#D4A447',
+    blue: '#7C6BF0',
     magenta: '#A78BFA',
     cyan: '#22D3EE',
-    white: '#E4E4E7',
+    white: '#E8E6E3',
     brightBlack: '#52525B',
     brightRed: '#F87171',
     brightGreen: '#4ADE80',
-    brightYellow: '#FACC15',
-    brightBlue: '#818CF8',
+    brightYellow: '#F5C842',
+    brightBlue: '#9B8AFB',
     brightMagenta: '#C4B5FD',
     brightCyan: '#67E8F9',
-    brightWhite: '#FAFAFA'
+    brightWhite: '#FAFAF9'
   }
 }
 
