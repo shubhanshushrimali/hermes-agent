@@ -7,6 +7,8 @@ import './store/active-work'
 import './store/power'
 // Side-effect: applies the persisted window translucency on load.
 import './store/translucency'
+// Side-effect: initialize Aizen developer delight (quotes, streaks, badges).
+import './store/aizen-delight'
 // Dev-only render/state churn counters. MUST precede the `react-dom` import
 // below: react-dom captures the devtools hook at module init, so bippy has to
 // install during THIS import's evaluation or every commit goes unseen
@@ -21,6 +23,9 @@ import { createRoot } from 'react-dom/client'
 import { HashRouter } from 'react-router'
 
 import App from './app'
+import { BootGate } from './components/boot/boot-gate'
+import { AizenQuoteOverlay } from './components/boot/aizen-quote-overlay'
+import { InlineEditHost } from './components/chat/inline-edit-host'
 import { RootErrorBoundary } from './components/error-boundary'
 import { HapticsProvider } from './components/haptics-provider'
 import { RootTooltipProvider } from './components/ui/tooltip'
@@ -86,7 +91,11 @@ if (winParam === 'overlay') {
                     both freeze for seconds despite the main thread being free.
                     Disabling transitions makes navigate() commit at default priority. */}
                   <HashRouter useTransitions={false}>
-                    <App />
+                    <BootGate>
+                      <App />
+                      <AizenQuoteOverlay />
+                      <InlineEditHost />
+                    </BootGate>
                   </HashRouter>
                 </RootTooltipProvider>
               </HapticsProvider>

@@ -4,6 +4,8 @@
  * Provides subtle, faded text ahead of the cursor that the user
  * can accept with Tab or dismiss by continuing to type.
  *
+ * Communicates via HTTP POST to `/api/ide/ghost-completion`.
+ *
  * Part of Phase 4: IDE-Grade Code Experience.
  */
 
@@ -104,43 +106,35 @@ export async function requestGhostCompletion(
 
   // Check connection.
   const conn = $connection.get()
-  if (!conn?.ws || conn.ws.readyState !== WebSocket.OPEN) {
+  if (!conn?.baseUrl) {
     return { ok: false, error: 'Not connected' }
   }
 
   try {
-    const completion = await new Promise<string>((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error('Timeout')), 5_000)
-
-      const handler = (event: MessageEvent) => {
-        try {
-          const data = JSON.parse(event.data)
-          if (data.type === 'ghost_completion_result') {
-            clearTimeout(timeout)
-            conn.ws!.removeEventListener('message', handler)
-            resolve(data.completion ?? '')
-          }
-        } catch {
-          // Ignore non-JSON messages.
-        }
-      }
-
-      conn.ws!.addEventListener('message', handler)
-      conn.ws!.send(JSON.stringify({
-        type: 'ghost_completion_request',
+    const response = await fetch(`${conn.baseUrl}/api/ide/ghost-completion`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
         prefix: request.prefix.slice(-500),  // Last 500 chars for context.
         suffix: request.suffix.slice(0, 200), // Next 200 chars.
         filePath: request.filePath,
         language: request.language,
-      }))
+      }),
+      signal: AbortSignal.timeout(5_000),
     })
 
-    if (completion) {
-      setCache(key, completion)
+    const data = await response.json()
+
+    if (data.ok && data.completion) {
+      setCache(key, data.completion)
+      return { ok: true, completion: data.completion }
     }
 
-    return { ok: true, completion }
+    return { ok: false, error: data.error ?? 'No completion' }
   } catch (err) {
+    if (err instanceof DOMException && err.name === 'TimeoutError') {
+      return { ok: false, error: 'Timeout' }
+    }
     return {
       ok: false,
       error: err instanceof Error ? err.message : 'Unknown error',

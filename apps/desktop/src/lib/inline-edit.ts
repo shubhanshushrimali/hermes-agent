@@ -4,6 +4,8 @@
  * Used by the Cmd+K inline edit widget to request AI-powered
  * code transformations within the Monaco editor.
  *
+ * Communicates via HTTP POST to `/api/ide/inline-edit`.
+ *
  * Part of Phase 4: IDE-Grade Code Experience.
  */
 
@@ -29,48 +31,38 @@ export interface InlineEditResult {
  * Request an inline code edit from the agent.
  *
  * Sends the selected code and natural language instruction to the
- * gateway, which forwards it to the agent for transformation.
+ * gateway via HTTP POST, which forwards it to the agent.
  */
 export async function requestInlineEdit(
   request: InlineEditRequest
 ): Promise<InlineEditResult> {
   const conn = $connection.get()
-  if (!conn?.ws || conn.ws.readyState !== WebSocket.OPEN) {
+  if (!conn?.baseUrl) {
     return { ok: false, error: 'Not connected to gateway' }
   }
 
-  const prompt = buildInlineEditPrompt(request)
-
   try {
-    // Send as a tool-use message through the existing gateway WS protocol.
-    // The gateway will route this to the agent and stream back the result.
-    const response = await new Promise<string>((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error('Inline edit timed out')), 30_000)
-
-      // Create a one-shot message listener for the response.
-      const handler = (event: MessageEvent) => {
-        try {
-          const data = JSON.parse(event.data)
-          if (data.type === 'inline_edit_result') {
-            clearTimeout(timeout)
-            conn.ws!.removeEventListener('message', handler)
-            resolve(data.replacement ?? '')
-          }
-        } catch {
-          // Not our message — ignore.
-        }
-      }
-
-      conn.ws!.addEventListener('message', handler)
-      conn.ws!.send(JSON.stringify({
-        type: 'inline_edit_request',
-        ...request,
-        prompt,
-      }))
+    const response = await fetch(`${conn.baseUrl}/api/ide/inline-edit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+      signal: AbortSignal.timeout(30_000),
     })
 
-    return { ok: true, replacement: response }
+    const data = await response.json()
+
+    if (data.ok && data.replacement !== undefined) {
+      return { ok: true, replacement: data.replacement }
+    }
+
+    return {
+      ok: false,
+      error: data.error ?? `HTTP ${response.status}`,
+    }
   } catch (err) {
+    if (err instanceof DOMException && err.name === 'TimeoutError') {
+      return { ok: false, error: 'Inline edit timed out (30s)' }
+    }
     return {
       ok: false,
       error: err instanceof Error ? err.message : 'Unknown error',
@@ -102,47 +94,4 @@ export async function applyInlineEdit(
   } catch {
     return false
   }
-}
-
-// ---------------------------------------------------------------------------
-// Internal: build the prompt for the agent
-// ---------------------------------------------------------------------------
-
-function buildInlineEditPrompt(request: InlineEditRequest): string {
-  const parts: string[] = []
-
-  parts.push(`File: ${request.filePath}`)
-  if (request.language) {
-    parts.push(`Language: ${request.language}`)
-  }
-
-  parts.push('')
-  parts.push('## Selected Code')
-  parts.push('```')
-  parts.push(request.selectedCode)
-  parts.push('```')
-
-  if (request.contextBefore) {
-    parts.push('')
-    parts.push('## Context Before')
-    parts.push('```')
-    parts.push(request.contextBefore)
-    parts.push('```')
-  }
-
-  if (request.contextAfter) {
-    parts.push('')
-    parts.push('## Context After')
-    parts.push('```')
-    parts.push(request.contextAfter)
-    parts.push('```')
-  }
-
-  parts.push('')
-  parts.push('## Instruction')
-  parts.push(request.instruction)
-  parts.push('')
-  parts.push('Respond with ONLY the replacement code. No explanations, no markdown fences.')
-
-  return parts.join('\n')
 }

@@ -14,7 +14,9 @@ import { requestComposerFocus, requestComposerInsertRefs } from '@/app/chat/comp
 import { droppedFileInlineRef } from '@/app/chat/composer/inline-refs'
 import { HERMES_PATHS_MIME } from '@/app/chat/hooks/use-composer-actions'
 import { RichCodeBlock } from '@/components/assistant-ui/embeds'
-import { CodeEditor } from '@/components/chat/code-editor'
+import { MonacoEditor, type MonacoEditorApi } from '@/components/chat/monaco-editor'
+import { useGhostText } from '@/components/chat/ghost-text-provider'
+import { registerCodeLensProvider } from '@/components/chat/code-lens-provider'
 import { FileDiffPanel } from '@/components/chat/diff-lines'
 import { chunkTextLines, useFixedRowWindow } from '@/components/chat/fixed-row-window'
 import { LazyShiki as ShikiHighlighter } from '@/components/chat/shiki-highlighter'
@@ -1023,7 +1025,7 @@ export function LocalFilePreview({ reloadKey, target }: { reloadKey: number; tar
           </div>
         )}
         <div className="min-h-0 flex-1 overflow-hidden">
-          <CodeEditor
+          <MonacoEditor
             filePath={filePath}
             initialValue={baselineRef.current}
             key={editorKey}

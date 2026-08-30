@@ -251,6 +251,55 @@ export function MonacoEditor({
           onCancelRef.current?.()
         })
 
+        // Cmd+K / Ctrl+K — Inline edit (dispatches custom event for widget)
+        editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyK, () => {
+          const selection = editor.getSelection()
+          if (!selection || selection.isEmpty()) return
+
+          const selectedCode = editor.getModel()?.getValueInRange(selection) ?? ''
+          if (!selectedCode.trim()) return
+
+          // Get context lines around the selection.
+          const model = editor.getModel()
+          const contextBefore = model?.getValueInRange({
+            startLineNumber: Math.max(1, selection.startLineNumber - 5),
+            startColumn: 1,
+            endLineNumber: selection.startLineNumber,
+            endColumn: 1,
+          }) ?? ''
+          const totalLines = model?.getLineCount() ?? 0
+          const contextAfter = model?.getValueInRange({
+            startLineNumber: selection.endLineNumber,
+            startColumn: selection.endColumn,
+            endLineNumber: Math.min(totalLines, selection.endLineNumber + 5),
+            endColumn: (model?.getLineLength(Math.min(totalLines, selection.endLineNumber + 5)) ?? 0) + 1,
+          }) ?? ''
+
+          // Dispatch a custom event for the InlineEditWidget to pick up.
+          const pos = editor.getScrolledVisiblePosition(selection.getStartPosition())
+          const containerRect = container.getBoundingClientRect()
+          window.dispatchEvent(new CustomEvent('aizen-inline-edit', {
+            detail: {
+              filePath,
+              selectedCode,
+              contextBefore,
+              contextAfter,
+              language: model?.getLanguageId() ?? '',
+              position: {
+                top: (pos?.top ?? 0) + containerRect.top + 20,
+                left: (pos?.left ?? 0) + containerRect.left,
+              },
+              // Callback to apply the replacement.
+              applyReplacement: (replacement: string) => {
+                editor.executeEdits('aizen-inline-edit', [{
+                  range: selection,
+                  text: replacement,
+                }])
+              },
+            },
+          }))
+        })
+
         // onChange listener
         editor.onDidChangeModelContent(() => {
           const value = editor.getValue()
