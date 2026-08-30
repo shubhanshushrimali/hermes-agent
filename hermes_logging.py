@@ -361,6 +361,22 @@ def setup_logging(
             log_filter=_ComponentFilter(COMPONENT_PREFIXES["gui"]),
         )
 
+    # --- structured.log (WARNING+, JSON format for machine parsing) ---------
+    # Enabled by default; disable via config.yaml ``logging.structured: false``.
+    structured_enabled = _read_structured_logging_config()
+    if structured_enabled:
+        try:
+            from hermes_json_logging import add_structured_handler
+            add_structured_handler(
+                str(log_dir),
+                level=logging.WARNING,
+                max_bytes=5 * 1024 * 1024,
+                backup_count=3,
+            )
+        except Exception:
+            # Structured logging is best-effort — don't break startup.
+            logger.debug("Failed to initialize structured JSON logging", exc_info=True)
+
     if _logging_initialized and not force:
         return log_dir
 
@@ -799,3 +815,30 @@ def _read_logging_config():
     except Exception:
         pass
     return (None, None, None)
+
+
+def _read_structured_logging_config() -> bool:
+    """Check if structured JSON logging is enabled in config.yaml.
+
+    Reads ``logging.structured`` (default ``True``).
+    """
+    try:
+        try:
+            from hermes_cli.config import read_raw_config as _rrc
+            cfg = _rrc() or {}
+        except Exception:
+            from utils import fast_safe_load
+            config_path = get_config_path()
+            if not config_path.exists():
+                return True  # default: enabled
+            with open(config_path, "r", encoding="utf-8") as f:
+                cfg = fast_safe_load(f) or {}
+        if cfg:
+            log_cfg = cfg.get("logging", {})
+            if isinstance(log_cfg, dict):
+                val = log_cfg.get("structured")
+                if val is not None:
+                    return bool(val)
+    except Exception:
+        pass
+    return True  # default: enabled

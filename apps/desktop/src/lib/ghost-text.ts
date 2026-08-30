@@ -1,0 +1,173 @@
+/**
+ * Ghost text — inline code completion suggestions.
+ *
+ * Provides subtle, faded text ahead of the cursor that the user
+ * can accept with Tab or dismiss by continuing to type.
+ *
+ * Part of Phase 4: IDE-Grade Code Experience.
+ */
+
+import { $connection } from '@/store/session'
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+export interface GhostCompletionRequest {
+  /** Code before the cursor. */
+  prefix: string
+  /** Code after the cursor. */
+  suffix: string
+  /** Full file path for context. */
+  filePath: string
+  /** Detected language. */
+  language?: string
+}
+
+export interface GhostCompletionResult {
+  ok: boolean
+  completion?: string
+  error?: string
+}
+
+// ---------------------------------------------------------------------------
+// Cache — avoid redundant requests for the same prefix
+// ---------------------------------------------------------------------------
+
+interface CacheEntry {
+  key: string
+  completion: string
+  timestamp: number
+}
+
+const CACHE_MAX = 50
+const CACHE_TTL_MS = 60_000 // 1 minute
+const cache: CacheEntry[] = []
+
+function getCached(key: string): string | null {
+  const now = Date.now()
+  const entry = cache.find((e) => e.key === key && now - e.timestamp < CACHE_TTL_MS)
+  return entry?.completion ?? null
+}
+
+function setCache(key: string, completion: string): void {
+  cache.push({ key, completion, timestamp: Date.now() })
+  // Evict oldest entries if over limit.
+  while (cache.length > CACHE_MAX) {
+    cache.shift()
+  }
+}
+
+function cacheKey(req: GhostCompletionRequest): string {
+  // Use last 200 chars of prefix + first 100 chars of suffix as key.
+  const p = req.prefix.slice(-200)
+  const s = req.suffix.slice(0, 100)
+  return `${req.filePath}::${p}::${s}`
+}
+
+// ---------------------------------------------------------------------------
+// Rate limiting
+// ---------------------------------------------------------------------------
+
+let lastRequestTime = 0
+const MIN_INTERVAL_MS = 500
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+/**
+ * Request a ghost text completion from the agent.
+ *
+ * Returns a partial code completion that can be shown as faded inline
+ * text ahead of the cursor.
+ *
+ * Rate-limited to at most 1 request per 500ms. Cached results are
+ * returned immediately without a network round-trip.
+ */
+export async function requestGhostCompletion(
+  request: GhostCompletionRequest
+): Promise<GhostCompletionResult> {
+  // Check cache first.
+  const key = cacheKey(request)
+  const cached = getCached(key)
+  if (cached !== null) {
+    return { ok: true, completion: cached }
+  }
+
+  // Rate limit.
+  const now = Date.now()
+  if (now - lastRequestTime < MIN_INTERVAL_MS) {
+    return { ok: false, error: 'Rate limited' }
+  }
+  lastRequestTime = now
+
+  // Check connection.
+  const conn = $connection.get()
+  if (!conn?.ws || conn.ws.readyState !== WebSocket.OPEN) {
+    return { ok: false, error: 'Not connected' }
+  }
+
+  try {
+    const completion = await new Promise<string>((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('Timeout')), 5_000)
+
+      const handler = (event: MessageEvent) => {
+        try {
+          const data = JSON.parse(event.data)
+          if (data.type === 'ghost_completion_result') {
+            clearTimeout(timeout)
+            conn.ws!.removeEventListener('message', handler)
+            resolve(data.completion ?? '')
+          }
+        } catch {
+          // Ignore non-JSON messages.
+        }
+      }
+
+      conn.ws!.addEventListener('message', handler)
+      conn.ws!.send(JSON.stringify({
+        type: 'ghost_completion_request',
+        prefix: request.prefix.slice(-500),  // Last 500 chars for context.
+        suffix: request.suffix.slice(0, 200), // Next 200 chars.
+        filePath: request.filePath,
+        language: request.language,
+      }))
+    })
+
+    if (completion) {
+      setCache(key, completion)
+    }
+
+    return { ok: true, completion }
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : 'Unknown error',
+    }
+  }
+}
+
+/**
+ * Create a debounced ghost text requester.
+ *
+ * Returns a function that, when called, waits `delayMs` after the
+ * last call before actually requesting a completion. This prevents
+ * flooding the agent while the user is actively typing.
+ */
+export function createDebouncedGhostRequester(
+  delayMs: number = 300
+): (
+  request: GhostCompletionRequest,
+  onResult: (result: GhostCompletionResult) => void
+) => void {
+  let timer: ReturnType<typeof setTimeout> | null = null
+
+  return (request, onResult) => {
+    if (timer) clearTimeout(timer)
+    timer = setTimeout(async () => {
+      const result = await requestGhostCompletion(request)
+      onResult(result)
+    }, delayMs)
+  }
+}
