@@ -91,6 +91,7 @@ import { $terminalTakeover, setTerminalTakeover } from '../right-sidebar/store'
 import { $workspaceIsPage } from '../routes'
 
 import { FilesPane, LogsPane, ReviewPaneContent } from './panes'
+import { CrewPanel, CostPanel, DaemonPanel, GitPanel, PlanPanel } from './aizen-panels'
 import { ContribWiring, WiredPane } from './wiring'
 
 /**
@@ -241,6 +242,79 @@ registry.registerMany([
       maxWidth: FILE_BROWSER_MAX_WIDTH
     },
     render: () => idle(<ReviewPaneContent />)
+  }
+])
+
+// ---------------------------------------------------------------------------
+// Aizen intelligence panels — Git, Crew, Daemon, Cost, Plan.
+// Registered as real contrib panes: they show up in zone menus, can be
+// dragged/stacked/split, and respond to keybinds.
+// ---------------------------------------------------------------------------
+
+registry.registerMany([
+  {
+    id: 'aizen-git',
+    area: 'panes',
+    title: 'git',
+    data: {
+      placement: 'right',
+      collapsible: true,
+      dock: { pane: 'workspace', pos: 'right' },
+      width: '280px',
+      minWidth: '200px',
+      maxWidth: '500px'
+    },
+    render: () => idle(<GitPanel />)
+  },
+  {
+    id: 'aizen-crew',
+    area: 'panes',
+    title: 'crew',
+    data: {
+      placement: 'bottom',
+      height: '18vh',
+      maxHeight: '50vh',
+      revealOnPreset: true
+    },
+    render: () => idle(<CrewPanel />)
+  },
+  {
+    id: 'aizen-daemon',
+    area: 'panes',
+    title: 'daemon',
+    data: {
+      placement: 'bottom',
+      height: '18vh',
+      maxHeight: '50vh',
+      revealOnPreset: true
+    },
+    render: () => idle(<DaemonPanel />)
+  },
+  {
+    id: 'aizen-cost',
+    area: 'panes',
+    title: 'cost',
+    data: {
+      placement: 'bottom',
+      height: '15vh',
+      maxHeight: '40vh',
+      revealOnPreset: true
+    },
+    render: () => idle(<CostPanel />)
+  },
+  {
+    id: 'aizen-plan',
+    area: 'panes',
+    title: 'plan',
+    data: {
+      placement: 'right',
+      collapsible: true,
+      dock: { pane: 'workspace', pos: 'right' },
+      width: '300px',
+      minWidth: '220px',
+      maxWidth: '500px'
+    },
+    render: () => idle(<PlanPanel />)
   }
 ])
 

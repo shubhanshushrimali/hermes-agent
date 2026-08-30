@@ -248,6 +248,13 @@ def register_aizen_extensions(app: Any, get_agent_fn: Any = None) -> None:
     except Exception:
         pass
 
+    # Run startup performance optimizations (SQLite tuning, cache eviction).
+    try:
+        from gateway.perf import run_startup_optimizations
+        run_startup_optimizations()
+    except Exception:
+        pass
+
     logger.info("All Aizen extension routes registered")
 
 
