@@ -2275,7 +2275,39 @@ class APIServerAdapter(BasePlatformAdapter):
             # Chronos managed-cron fire webhook (NAS → agent). Authenticated
             # by a NAS-minted JWT (NOT API_SERVER_KEY).
             routes.append(("POST", "/api/cron/fire", self._handle_cron_fire))
+
+        # --- Aizen Extensions (graph engine, observability, etc.) ---
+        try:
+            from gateway.aizen_extensions import get_extension_routes
+            for method, path, handler in get_extension_routes(self):
+                routes.append((method, path, handler))
+        except Exception:
+            pass  # Extensions are optional — never crash core.
+
+        # Graph engine status endpoint.
+        routes.append(("GET", "/api/graph/status", self._handle_graph_status))
+
         return routes
+
+    async def _handle_graph_status(self, request):
+        """Health check for the graph engine, LiteLLM, and Langfuse."""
+        from aiohttp import web
+        status = {"graph_engine": False, "litellm": False, "langfuse": False}
+        try:
+            from gateway.graph_engine import LANGGRAPH_AVAILABLE, LITELLM_AVAILABLE, LANGFUSE_AVAILABLE
+            status["graph_engine"] = LANGGRAPH_AVAILABLE
+            status["litellm"] = LITELLM_AVAILABLE
+            status["langfuse"] = LANGFUSE_AVAILABLE
+        except ImportError:
+            pass
+        try:
+            from gateway.graph_engine import get_budget
+            budget = get_budget()
+            status["budget_remaining_usd"] = budget.remaining_budget
+            status["daily_spend_usd"] = budget.daily_spend
+        except Exception:
+            pass
+        return web.json_response(status)
 
     # ------------------------------------------------------------------
     # Session header helpers

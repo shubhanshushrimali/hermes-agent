@@ -1,0 +1,48 @@
+# docker/langfuse.yml — Self-hosted Langfuse for Hermes Agent
+# Usage: docker compose -f docker/langfuse.yml up -d
+# Dashboard: http://localhost:3000
+#
+# After starting:
+#   1. Visit http://localhost:3000
+#   2. Create an account and project
+#   3. Go to Settings → API Keys → Create new
+#   4. Set environment variables:
+#      LANGFUSE_HOST=http://localhost:3000
+#      LANGFUSE_PUBLIC_KEY=pk-...
+#      LANGFUSE_SECRET_KEY=sk-...
+
+version: "3.8"
+
+services:
+  langfuse:
+    image: langfuse/langfuse:latest
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: "postgresql://langfuse:langfuse@postgres:5432/langfuse"
+      NEXTAUTH_SECRET: "hermes-aizen-secret-change-in-production"
+      SALT: "hermes-aizen-salt-change-in-production"
+      NEXTAUTH_URL: "http://localhost:3000"
+      TELEMETRY_ENABLED: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: langfuse
+      POSTGRES_PASSWORD: langfuse
+      POSTGRES_DB: langfuse
+    volumes:
+      - langfuse_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U langfuse"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  langfuse_pg_data:
