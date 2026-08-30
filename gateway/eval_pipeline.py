@@ -77,6 +77,18 @@ DATASETS: Dict[str, List[EvalCase]] = {
             intent="code",
             expected_keywords=["injection", "sanitize", "security", "dangerous"],
         ),
+        EvalCase(
+            id="cr-4",
+            prompt="Review:\ndef get_user(id):\n    return db.execute(f'SELECT * FROM users WHERE id = {id}')",
+            intent="code",
+            expected_keywords=["SQL injection", "parameterized", "prepared"],
+        ),
+        EvalCase(
+            id="cr-5",
+            prompt="Review:\ndef process(data):\n    for item in data:\n        for sub in item:\n            for x in sub:\n                result.append(transform(x))\n    return result",
+            intent="code",
+            expected_keywords=["nested", "readability", "comprehension", "refactor"],
+        ),
     ],
     "debug": [
         EvalCase(
@@ -91,6 +103,18 @@ DATASETS: Dict[str, List[EvalCase]] = {
             intent="debug",
             expected_keywords=["append", "O(n", "performance", "copy"],
         ),
+        EvalCase(
+            id="db-3",
+            prompt="TypeError: unhashable type: 'list'\nmy_dict = {[1,2]: 'value'}",
+            intent="debug",
+            expected_keywords=["unhashable", "list", "tuple", "immutable"],
+        ),
+        EvalCase(
+            id="db-4",
+            prompt="My recursive function never returns:\ndef fib(n):\n    return fib(n-1) + fib(n-2)",
+            intent="debug",
+            expected_keywords=["base case", "recursion", "infinite", "stack overflow"],
+        ),
     ],
     "classify": [
         EvalCase(
@@ -104,6 +128,107 @@ DATASETS: Dict[str, List[EvalCase]] = {
             prompt="What's the weather like today?",
             intent="chat",
             expected_keywords=["weather"],
+        ),
+        EvalCase(
+            id="cl-3",
+            prompt="Refactor the database module to use connection pooling",
+            intent="refactor",
+            expected_keywords=["refactor", "database", "pool"],
+        ),
+        EvalCase(
+            id="cl-4",
+            prompt="Find papers about transformer architectures from 2024",
+            intent="research",
+            expected_keywords=["transformer", "research", "paper"],
+        ),
+    ],
+    "refactor": [
+        EvalCase(
+            id="rf-1",
+            prompt="Refactor this to remove duplication:\ndef area_circle(r): return 3.14*r*r\ndef area_sphere(r): return 4*3.14*r*r",
+            intent="refactor",
+            expected_keywords=["constant", "math.pi", "DRY", "reuse"],
+        ),
+        EvalCase(
+            id="rf-2",
+            prompt="Refactor these if-elif chains into a cleaner pattern:\nif action == 'create': do_create()\nelif action == 'read': do_read()\nelif action == 'update': do_update()\nelif action == 'delete': do_delete()",
+            intent="refactor",
+            expected_keywords=["dict", "dispatch", "mapping", "strategy"],
+        ),
+        EvalCase(
+            id="rf-3",
+            prompt="Refactor: class with 15 methods and 500 lines doing auth, email, and logging",
+            intent="refactor",
+            expected_keywords=["single responsibility", "separate", "class", "module"],
+        ),
+    ],
+    "security": [
+        EvalCase(
+            id="sec-1",
+            prompt="Is this JWT validation secure?\ntoken = jwt.decode(token_str, algorithms=['none'])",
+            intent="code",
+            expected_keywords=["algorithm none", "insecure", "verify", "secret"],
+        ),
+        EvalCase(
+            id="sec-2",
+            prompt="Review CORS config:\napp.add_middleware(CORSMiddleware, allow_origins=['*'], allow_credentials=True)",
+            intent="code",
+            expected_keywords=["wildcard", "credentials", "CORS", "restrict"],
+        ),
+        EvalCase(
+            id="sec-3",
+            prompt="Is this safe?\nuser_input = request.args.get('name')\nreturn f'<h1>Hello {user_input}</h1>'",
+            intent="code",
+            expected_keywords=["XSS", "cross-site", "escape", "sanitize"],
+        ),
+        EvalCase(
+            id="sec-4",
+            prompt="Review:\nsubprocess.call(f'convert {filename}', shell=True)",
+            intent="code",
+            expected_keywords=["shell", "injection", "subprocess", "list"],
+            forbidden_keywords=["looks good", "no issues"],
+        ),
+    ],
+    "api-design": [
+        EvalCase(
+            id="api-1",
+            prompt="Design a REST API for a todo app with users, lists, and items",
+            intent="code",
+            expected_keywords=["GET", "POST", "endpoint", "resource"],
+        ),
+        EvalCase(
+            id="api-2",
+            prompt="How should I handle pagination in a REST API returning 10,000 items?",
+            intent="code",
+            expected_keywords=["cursor", "offset", "limit", "page"],
+        ),
+    ],
+    "testing": [
+        EvalCase(
+            id="test-1",
+            prompt="Write unit tests for:\ndef is_palindrome(s): return s == s[::-1]",
+            intent="code",
+            expected_keywords=["test", "assert", "palindrome", "edge case"],
+        ),
+        EvalCase(
+            id="test-2",
+            prompt="What's wrong with this test?\ndef test_add(): assert add(2, 2) == 5",
+            intent="debug",
+            expected_keywords=["expected", "4", "wrong", "assertion"],
+        ),
+    ],
+    "architecture": [
+        EvalCase(
+            id="arch-1",
+            prompt="I have a monolith handling auth, payments, and email. How should I split it?",
+            intent="code",
+            expected_keywords=["microservice", "domain", "service", "boundary"],
+        ),
+        EvalCase(
+            id="arch-2",
+            prompt="When should I use a message queue vs direct API calls between services?",
+            intent="code",
+            expected_keywords=["async", "decouple", "reliability", "queue"],
         ),
     ],
 }

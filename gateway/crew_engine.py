@@ -27,15 +27,18 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("hermes.crew_engine")
 
-# Try importing CrewAI.
+# Try importing CrewAI (with Python 3.14 compat shim).
 try:
+    import gateway.crewai_compat  # noqa: F401  # patches langchain for 3.14
     from crewai import Agent, Crew, Task, Process
     from crewai.project import CrewBase
 
     CREWAI_AVAILABLE = True
-except ImportError:
+except Exception as _crewai_err:
     CREWAI_AVAILABLE = False
-    logger.info("CrewAI not installed — multi-agent disabled. pip install crewai")
+    # Python 3.14 triggers TypeError in Pydantic type annotations.
+    # This is a known incompatibility with crewai 0.11.x + langchain 0.3.x.
+    logger.info("CrewAI not available (%s) — using built-in agent orchestration", type(_crewai_err).__name__)
 
 # Try importing LiteLLM for model routing.
 try:

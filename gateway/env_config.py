@@ -95,11 +95,38 @@ def setup_langfuse_local() -> None:
     """Configure Langfuse for local Docker instance if no keys set.
 
     If the user runs `docker compose -f docker/langfuse.yml up`,
-    the default keys are pre-configured in the compose file.
+    the default keys are pre-seeded in the compose file.
+    Auto-detects if Langfuse is running on localhost:3000.
     """
-    if not os.environ.get("LANGFUSE_SECRET_KEY"):
-        os.environ.setdefault("LANGFUSE_SECRET_KEY", "sk-lf-local-dev")
-    if not os.environ.get("LANGFUSE_PUBLIC_KEY"):
-        os.environ.setdefault("LANGFUSE_PUBLIC_KEY", "pk-lf-local-dev")
-    if not os.environ.get("LANGFUSE_HOST"):
-        os.environ.setdefault("LANGFUSE_HOST", "http://localhost:3000")
+    if os.environ.get("LANGFUSE_SECRET_KEY"):
+        return  # User has custom keys — don't override.
+
+    # Use the seeded keys from docker/langfuse.yml.
+    os.environ.setdefault("LANGFUSE_SECRET_KEY", "sk-lf-hermes-local")
+    os.environ.setdefault("LANGFUSE_PUBLIC_KEY", "pk-lf-hermes-local")
+    os.environ.setdefault("LANGFUSE_HOST", "http://localhost:3000")
+
+    # Check if Langfuse is actually reachable.
+    try:
+        import urllib.request
+        req = urllib.request.Request(
+            "http://localhost:3000/api/public/health",
+            method="GET",
+        )
+        with urllib.request.urlopen(req, timeout=2) as resp:
+            if resp.status == 200:
+                logger.info("  Langfuse:  AUTO-CONFIGURED (Docker localhost:3000)")
+                return
+    except Exception:
+        pass
+
+    logger.debug("Langfuse keys set but service not reachable yet")
+
+
+def auto_configure_integrations() -> None:
+    """Auto-configure all integrations at startup.
+
+    Call this from aizen_extensions to set up everything.
+    """
+    setup_langfuse_local()
+

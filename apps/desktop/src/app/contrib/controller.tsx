@@ -92,6 +92,7 @@ import { $workspaceIsPage } from '../routes'
 
 import { FilesPane, LogsPane, ReviewPaneContent } from './panes'
 import { CrewPanel, CostPanel, DaemonPanel, GitPanel, PlanPanel } from './aizen-panels'
+import { LivePreviewPanel } from './live-preview'
 import { ContribWiring, WiredPane } from './wiring'
 
 /**
@@ -315,6 +316,21 @@ registry.registerMany([
       maxWidth: '500px'
     },
     render: () => idle(<PlanPanel />)
+  },
+  {
+    id: 'aizen-preview',
+    area: 'panes',
+    title: 'preview',
+    data: {
+      placement: 'right',
+      collapsible: true,
+      dock: { pane: 'workspace', pos: 'right' },
+      width: '45vw',
+      minWidth: '300px',
+      maxWidth: '70vw',
+      revealOnPreset: true
+    },
+    render: () => idle(<LivePreviewPanel />)
   }
 ])
 

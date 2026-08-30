@@ -2,16 +2,14 @@
 # Usage: docker compose -f docker/langfuse.yml up -d
 # Dashboard: http://localhost:3000
 #
-# After starting:
-#   1. Visit http://localhost:3000
-#   2. Create an account and project
-#   3. Go to Settings → API Keys → Create new
-#   4. Set environment variables:
-#      LANGFUSE_HOST=http://localhost:3000
-#      LANGFUSE_PUBLIC_KEY=pk-...
-#      LANGFUSE_SECRET_KEY=sk-...
-
-version: "3.8"
+# Default credentials: admin@hermes.local / hermes-admin
+# Default API keys are pre-seeded — no manual setup needed:
+#   LANGFUSE_HOST=http://localhost:3000
+#   LANGFUSE_PUBLIC_KEY=pk-lf-hermes-local
+#   LANGFUSE_SECRET_KEY=sk-lf-hermes-local
+#
+# These keys are auto-configured by gateway/env_config.py when
+# no custom keys are set.
 
 services:
   langfuse:
@@ -24,6 +22,16 @@ services:
       SALT: "hermes-aizen-salt-change-in-production"
       NEXTAUTH_URL: "http://localhost:3000"
       TELEMETRY_ENABLED: "false"
+      # Seed admin user + API keys on first start.
+      LANGFUSE_INIT_ORG_ID: "hermes-org"
+      LANGFUSE_INIT_ORG_NAME: "Hermes Agent"
+      LANGFUSE_INIT_PROJECT_ID: "hermes-project"
+      LANGFUSE_INIT_PROJECT_NAME: "Hermes Agent"
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: "pk-lf-hermes-local"
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: "sk-lf-hermes-local"
+      LANGFUSE_INIT_USER_EMAIL: "admin@hermes.local"
+      LANGFUSE_INIT_USER_NAME: "Hermes Admin"
+      LANGFUSE_INIT_USER_PASSWORD: "hermes-admin"
     depends_on:
       postgres:
         condition: service_healthy
