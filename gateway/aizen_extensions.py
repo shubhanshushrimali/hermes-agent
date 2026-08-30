@@ -241,6 +241,13 @@ def register_aizen_extensions(app: Any, get_agent_fn: Any = None) -> None:
     except ImportError as e:
         logger.debug("Panel routes not registered: %s", e)
 
+    # Log integration status at startup.
+    try:
+        from gateway.env_config import log_startup_status
+        log_startup_status()
+    except Exception:
+        pass
+
     logger.info("All Aizen extension routes registered")
 
 
