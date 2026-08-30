@@ -1,0 +1,733 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#0B0D10">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="description" content="Hermes Agent — Aizen Version mobile remote control">
+  <title>Hermes Remote</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icon-192.png" type="image/png">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0B0D10;
+      --card: #12151A;
+      --border: #23262F;
+      --fg: #E4E4E7;
+      --fg-muted: #A1A1AA;
+      --indigo: #6366F1;
+      --indigo-dim: rgba(99, 102, 241, 0.15);
+      --gold: #C9A84C;
+      --green: #22C55E;
+      --red: #EF4444;
+      --radius: 12px;
+      --safe-top: env(safe-area-inset-top, 0px);
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--fg);
+      min-height: 100dvh;
+      overflow-x: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ---- Header ---- */
+    .header {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      padding: calc(12px + var(--safe-top)) 16px 12px;
+      background: color-mix(in srgb, var(--bg) 90%, transparent);
+      backdrop-filter: blur(12px) saturate(120%);
+      -webkit-backdrop-filter: blur(12px) saturate(120%);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .header img {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      border: 2px solid var(--indigo-dim);
+    }
+
+    .header h1 {
+      font-size: 16px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+    }
+
+    .header .subtitle {
+      font-size: 12px;
+      font-weight: 300;
+      font-style: italic;
+      color: var(--indigo);
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      margin-left: auto;
+      background: var(--fg-muted);
+      transition: background 300ms;
+    }
+
+    .status-dot.connected { background: var(--green); }
+    .status-dot.error { background: var(--red); }
+
+    /* ---- Pages ---- */
+    .page { display: none; padding: 16px; padding-bottom: calc(80px + var(--safe-bottom)); }
+    .page.active { display: block; }
+
+    /* ---- Cards ---- */
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+      margin-bottom: 12px;
+      transition: transform 100ms ease;
+    }
+
+    .card:active { transform: scale(0.98); }
+
+    .card-title {
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    .card-desc {
+      font-size: 12px;
+      color: var(--fg-muted);
+    }
+
+    /* ---- Composer ---- */
+    .composer {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      padding: 12px 16px calc(12px + var(--safe-bottom));
+      background: color-mix(in srgb, var(--bg) 95%, transparent);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-top: 1px solid var(--border);
+      display: flex;
+      gap: 8px;
+      z-index: 100;
+    }
+
+    .composer input {
+      flex: 1;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 14px;
+      color: var(--fg);
+      font-size: 14px;
+      font-family: inherit;
+      outline: none;
+      transition: border-color 200ms, box-shadow 200ms;
+    }
+
+    .composer input:focus {
+      border-color: var(--indigo);
+      box-shadow: 0 0 0 2px var(--indigo-dim);
+    }
+
+    .composer button {
+      background: var(--indigo);
+      border: none;
+      border-radius: 8px;
+      padding: 10px 16px;
+      color: white;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: transform 100ms, opacity 100ms;
+    }
+
+    .composer button:active { transform: scale(0.95); }
+    .composer button:disabled { opacity: 0.5; }
+
+    /* ---- Chat messages ---- */
+    .messages {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .message {
+      max-width: 85%;
+      padding: 10px 14px;
+      border-radius: 12px;
+      font-size: 14px;
+      line-height: 1.5;
+      animation: msg-in 200ms ease-out;
+    }
+
+    @keyframes msg-in {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .message.user {
+      align-self: flex-end;
+      background: var(--indigo);
+      color: white;
+      border-bottom-right-radius: 4px;
+    }
+
+    .message.assistant {
+      align-self: flex-start;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-bottom-left-radius: 4px;
+    }
+
+    .message pre {
+      margin: 8px 0;
+      padding: 8px;
+      background: rgba(0, 0, 0, 0.2);
+      border-radius: 6px;
+      overflow-x: auto;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+    }
+
+    /* ---- Sessions list ---- */
+    .session-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 16px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      margin-bottom: 8px;
+      cursor: pointer;
+      transition: background 150ms;
+    }
+
+    .session-item:hover {
+      background: color-mix(in srgb, var(--indigo) 8%, var(--card));
+    }
+
+    .session-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      background: var(--indigo-dim);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+    }
+
+    .session-meta {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .session-name {
+      font-size: 14px;
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .session-date {
+      font-size: 11px;
+      color: var(--fg-muted);
+    }
+
+    /* ---- PIN pairing ---- */
+    .pin-page {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 80dvh;
+      text-align: center;
+      gap: 24px;
+    }
+
+    .pin-input {
+      display: flex;
+      gap: 8px;
+    }
+
+    .pin-input input {
+      width: 44px;
+      height: 52px;
+      text-align: center;
+      font-size: 24px;
+      font-weight: 600;
+      background: var(--card);
+      border: 2px solid var(--border);
+      border-radius: 8px;
+      color: var(--fg);
+      outline: none;
+      caret-color: var(--indigo);
+      transition: border-color 200ms;
+    }
+
+    .pin-input input:focus {
+      border-color: var(--indigo);
+    }
+
+    .connect-btn {
+      width: 100%;
+      max-width: 280px;
+      padding: 14px;
+      background: var(--indigo);
+      color: white;
+      border: none;
+      border-radius: 10px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 100ms;
+    }
+
+    .connect-btn:active { transform: scale(0.97); }
+
+    /* ---- Tab bar ---- */
+    .tab-bar {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      padding: 8px 0 calc(8px + var(--safe-bottom));
+      background: color-mix(in srgb, var(--bg) 95%, transparent);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-top: 1px solid var(--border);
+      display: flex;
+      justify-content: space-around;
+      z-index: 100;
+    }
+
+    .tab-btn {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+      background: none;
+      border: none;
+      color: var(--fg-muted);
+      font-size: 10px;
+      font-family: inherit;
+      cursor: pointer;
+      padding: 4px 12px;
+      transition: color 200ms;
+    }
+
+    .tab-btn.active { color: var(--indigo); }
+    .tab-btn svg { width: 22px; height: 22px; }
+
+    /* ---- Loading spinner ---- */
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .spinner {
+      width: 20px;
+      height: 20px;
+      border: 2px solid var(--border);
+      border-top-color: var(--indigo);
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+    }
+
+    /* ---- Empty state ---- */
+    .empty-state {
+      text-align: center;
+      padding: 48px 16px;
+      color: var(--fg-muted);
+    }
+
+    .empty-state .icon { font-size: 48px; margin-bottom: 12px; }
+    .empty-state h3 { font-size: 16px; font-weight: 500; color: var(--fg); margin-bottom: 4px; }
+    .empty-state p { font-size: 13px; }
+  </style>
+</head>
+<body>
+  <!-- ===== PIN Pairing Page ===== -->
+  <div id="pin-page" class="page active">
+    <div class="pin-page">
+      <img id="avatar" src="" alt="Aizen" style="width: 80px; height: 80px; border-radius: 50%; border: 2px solid var(--indigo-dim);">
+      <div>
+        <h2 style="font-size: 20px; font-weight: 600;">Hermes Remote</h2>
+        <p style="font-size: 13px; color: var(--fg-muted); margin-top: 4px;">Enter your 6-digit PIN to connect</p>
+      </div>
+      <div>
+        <label style="font-size: 12px; color: var(--fg-muted); display: block; margin-bottom: 8px;">Gateway URL</label>
+        <input id="gateway-url" type="url" placeholder="http://192.168.1.x:7862" style="width: 280px; padding: 10px 14px; background: var(--card); border: 1px solid var(--border); border-radius: 8px; color: var(--fg); font-size: 14px; outline: none;">
+      </div>
+      <div class="pin-input" id="pin-inputs"></div>
+      <button class="connect-btn" id="connect-btn" onclick="connectWithPin()">Connect</button>
+      <p id="pin-error" style="color: var(--red); font-size: 13px; display: none;"></p>
+    </div>
+  </div>
+
+  <!-- ===== Main App ===== -->
+  <div id="main-app" style="display: none;">
+    <!-- Header -->
+    <div class="header">
+      <img id="app-avatar" src="" alt="Aizen">
+      <div>
+        <h1>Hermes Agent</h1>
+        <span class="subtitle">— Aizen Version</span>
+      </div>
+      <div class="status-dot" id="status-dot" title="Disconnected"></div>
+    </div>
+
+    <!-- Chat Page -->
+    <div id="chat-page" class="page active">
+      <div class="messages" id="messages"></div>
+    </div>
+
+    <!-- Sessions Page -->
+    <div id="sessions-page" class="page">
+      <h2 style="font-size: 18px; font-weight: 600; margin-bottom: 16px;">Sessions</h2>
+      <div id="sessions-list"></div>
+    </div>
+
+    <!-- Settings Page -->
+    <div id="settings-page" class="page">
+      <h2 style="font-size: 18px; font-weight: 600; margin-bottom: 16px;">Settings</h2>
+      <div class="card">
+        <div class="card-title">Connection</div>
+        <div class="card-desc" id="conn-info">Not connected</div>
+      </div>
+      <div class="card" onclick="disconnect()" style="cursor: pointer;">
+        <div class="card-title" style="color: var(--red);">Disconnect</div>
+        <div class="card-desc">Log out and return to PIN screen</div>
+      </div>
+    </div>
+
+    <!-- Composer -->
+    <div class="composer" id="composer">
+      <input id="msg-input" type="text" placeholder="Message Hermes..." autocomplete="off">
+      <button id="send-btn" onclick="sendMessage()">Send</button>
+    </div>
+
+    <!-- Tab Bar -->
+    <div class="tab-bar" id="tab-bar">
+      <button class="tab-btn active" data-page="chat" onclick="switchTab('chat')">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 01-2.555-.337A5.972 5.972 0 015.41 20.97a5.969 5.969 0 01-.474-.065 4.48 4.48 0 00.978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25z"/></svg>
+        Chat
+      </button>
+      <button class="tab-btn" data-page="sessions" onclick="switchTab('sessions')">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 12h16.5m-16.5 3.75h16.5M3.75 19.5h16.5M5.625 4.5h12.75a1.875 1.875 0 010 3.75H5.625a1.875 1.875 0 010-3.75z"/></svg>
+        Sessions
+      </button>
+      <button class="tab-btn" data-page="settings" onclick="switchTab('settings')">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+        Settings
+      </button>
+    </div>
+  </div>
+
+  <script>
+    // ===== State =====
+    let gatewayUrl = localStorage.getItem('hermes-gateway-url') || '';
+    let authToken = localStorage.getItem('hermes-auth-token') || '';
+    let activeSessionId = null;
+    let connected = false;
+
+    // ===== Init =====
+    function init() {
+      // Create PIN inputs
+      const pinContainer = document.getElementById('pin-inputs');
+      for (let i = 0; i < 6; i++) {
+        const input = document.createElement('input');
+        input.type = 'tel';
+        input.maxLength = 1;
+        input.pattern = '[0-9]';
+        input.inputMode = 'numeric';
+        input.dataset.idx = i;
+        input.addEventListener('input', handlePinInput);
+        input.addEventListener('keydown', handlePinKeydown);
+        pinContainer.appendChild(input);
+      }
+
+      // Restore gateway URL
+      if (gatewayUrl) {
+        document.getElementById('gateway-url').value = gatewayUrl;
+      }
+
+      // Auto-connect if we have a token
+      if (authToken && gatewayUrl) {
+        verifyExistingToken();
+      }
+
+      // Enter key in composer
+      document.getElementById('msg-input').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') sendMessage();
+      });
+    }
+
+    // ===== PIN input handling =====
+    function handlePinInput(e) {
+      const val = e.target.value.replace(/[^0-9]/g, '');
+      e.target.value = val;
+      if (val && e.target.dataset.idx < 5) {
+        e.target.nextElementSibling?.focus();
+      }
+    }
+
+    function handlePinKeydown(e) {
+      if (e.key === 'Backspace' && !e.target.value && e.target.dataset.idx > 0) {
+        e.target.previousElementSibling?.focus();
+      }
+    }
+
+    function getPin() {
+      return Array.from(document.querySelectorAll('.pin-input input'))
+        .map(i => i.value).join('');
+    }
+
+    // ===== Connection =====
+    async function connectWithPin() {
+      const url = document.getElementById('gateway-url').value.replace(/\/$/, '');
+      const pin = getPin();
+
+      if (!url) return showPinError('Enter gateway URL');
+      if (pin.length !== 6) return showPinError('Enter all 6 digits');
+
+      const btn = document.getElementById('connect-btn');
+      btn.textContent = 'Connecting...';
+      btn.disabled = true;
+
+      try {
+        const res = await fetch(`${url}/api/mobile/auth/verify`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pin }),
+        });
+
+        const data = await res.json();
+        if (data.ok && data.token) {
+          gatewayUrl = url;
+          authToken = data.token;
+          localStorage.setItem('hermes-gateway-url', url);
+          localStorage.setItem('hermes-auth-token', authToken);
+          showMainApp();
+        } else {
+          showPinError(data.error || 'Invalid PIN');
+        }
+      } catch (err) {
+        showPinError('Cannot reach gateway');
+      } finally {
+        btn.textContent = 'Connect';
+        btn.disabled = false;
+      }
+    }
+
+    async function verifyExistingToken() {
+      try {
+        const res = await fetch(`${gatewayUrl}/api/mobile/auth/token`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: authToken }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          showMainApp();
+        } else {
+          // Token expired — show PIN page.
+          authToken = '';
+          localStorage.removeItem('hermes-auth-token');
+        }
+      } catch {
+        // Offline — try to show app anyway (graceful degradation).
+        showMainApp();
+      }
+    }
+
+    function disconnect() {
+      authToken = '';
+      localStorage.removeItem('hermes-auth-token');
+      connected = false;
+      document.getElementById('main-app').style.display = 'none';
+      document.getElementById('pin-page').classList.add('active');
+    }
+
+    function showPinError(msg) {
+      const el = document.getElementById('pin-error');
+      el.textContent = msg;
+      el.style.display = 'block';
+      setTimeout(() => el.style.display = 'none', 3000);
+    }
+
+    // ===== Main App =====
+    function showMainApp() {
+      document.getElementById('pin-page').classList.remove('active');
+      document.getElementById('main-app').style.display = 'block';
+      connected = true;
+      updateStatus('connected');
+      document.getElementById('conn-info').textContent = `Connected to ${gatewayUrl}`;
+      loadSessions();
+    }
+
+    function updateStatus(state) {
+      const dot = document.getElementById('status-dot');
+      dot.className = 'status-dot ' + state;
+      dot.title = state === 'connected' ? 'Connected' : state === 'error' ? 'Error' : 'Disconnected';
+    }
+
+    // ===== Tab navigation =====
+    function switchTab(page) {
+      document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.getElementById(`${page}-page`).classList.add('active');
+      document.querySelector(`[data-page="${page}"]`).classList.add('active');
+
+      // Show/hide composer
+      const composer = document.getElementById('composer');
+      composer.style.display = page === 'chat' ? 'flex' : 'none';
+    }
+
+    // ===== Sessions =====
+    async function loadSessions() {
+      try {
+        const res = await apiFetch('/api/sessions');
+        const data = await res.json();
+        const list = document.getElementById('sessions-list');
+
+        if (!data.sessions || data.sessions.length === 0) {
+          list.innerHTML = '<div class="empty-state"><div class="icon">💬</div><h3>No sessions</h3><p>Start a conversation to create one</p></div>';
+          return;
+        }
+
+        list.innerHTML = data.sessions.map(s => `
+          <div class="session-item" onclick="openSession('${s.id}')">
+            <div class="session-icon">💬</div>
+            <div class="session-meta">
+              <div class="session-name">${escapeHtml(s.title || s.id)}</div>
+              <div class="session-date">${new Date(s.updated_at || s.created_at).toLocaleDateString()}</div>
+            </div>
+          </div>
+        `).join('');
+      } catch {
+        document.getElementById('sessions-list').innerHTML =
+          '<div class="empty-state"><div class="icon">⚠️</div><h3>Cannot load sessions</h3><p>Check your connection</p></div>';
+      }
+    }
+
+    async function openSession(id) {
+      activeSessionId = id;
+      switchTab('chat');
+      await loadMessages(id);
+    }
+
+    async function loadMessages(sessionId) {
+      try {
+        const res = await apiFetch(`/api/sessions/${sessionId}/messages`);
+        const data = await res.json();
+        const container = document.getElementById('messages');
+        container.innerHTML = '';
+
+        (data.messages || []).forEach(msg => {
+          appendMessage(msg.role || 'assistant', msg.content || msg.text || '');
+        });
+
+        container.scrollTop = container.scrollHeight;
+      } catch {
+        // Silently fail.
+      }
+    }
+
+    // ===== Chat =====
+    async function sendMessage() {
+      const input = document.getElementById('msg-input');
+      const text = input.value.trim();
+      if (!text) return;
+
+      input.value = '';
+      appendMessage('user', text);
+
+      const btn = document.getElementById('send-btn');
+      btn.disabled = true;
+
+      try {
+        // Create session if needed.
+        if (!activeSessionId) {
+          const createRes = await apiFetch('/api/sessions', {
+            method: 'POST',
+            body: JSON.stringify({ title: text.slice(0, 50) }),
+          });
+          const createData = await createRes.json();
+          activeSessionId = createData.id || createData.session_id;
+        }
+
+        // Send message.
+        const res = await apiFetch(`/api/sessions/${activeSessionId}/chat`, {
+          method: 'POST',
+          body: JSON.stringify({ message: text }),
+        });
+
+        const data = await res.json();
+        const reply = data.response || data.content || data.text || JSON.stringify(data);
+        appendMessage('assistant', reply);
+      } catch (err) {
+        appendMessage('assistant', `Error: ${err.message}`);
+      } finally {
+        btn.disabled = false;
+        input.focus();
+      }
+    }
+
+    function appendMessage(role, content) {
+      const container = document.getElementById('messages');
+      const div = document.createElement('div');
+      div.className = `message ${role}`;
+      div.innerHTML = formatContent(content);
+      container.appendChild(div);
+      div.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    }
+
+    function formatContent(text) {
+      // Simple markdown: code blocks.
+      return escapeHtml(text).replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>');
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    // ===== API helpers =====
+    async function apiFetch(path, opts = {}) {
+      const headers = {
+        'Content-Type': 'application/json',
+        ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+        ...opts.headers,
+      };
+      return fetch(`${gatewayUrl}${path}`, { ...opts, headers });
+    }
+
+    // ===== Service Worker registration =====
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js').catch(() => {});
+    }
+
+    init();
+  </script>
+</body>
+</html>

@@ -16,7 +16,7 @@ import { atom } from 'nanostores'
 
 import {
   getQuoteForTrigger,
-  startSessionTimer,
+  recordSessionStart,
   shouldShowBreakReminder,
   type AizenQuote,
 } from '@/lib/developer-delight'
@@ -65,8 +65,8 @@ let breakCheckTimer: ReturnType<typeof setInterval> | null = null
  * Call once during app startup (import for side effect).
  */
 export function initAizenDelight(): void {
-  // First session of the day.
-  startSessionTimer()
+  // First session of the day — also records streak.
+  recordSessionStart()
   showQuote('first-session')
 
   // Break reminder every 90 minutes.

@@ -239,3 +239,115 @@ export function earnBadge(badgeId: string): boolean {
   localStorage.setItem(BADGE_STORAGE_KEY, JSON.stringify(earned))
   return true // Badge was newly earned
 }
+
+// ---------------------------------------------------------------------------
+// Streak tracking — persists daily coding activity in localStorage
+// ---------------------------------------------------------------------------
+
+const STREAK_KEY = 'hermes-aizen-streak'
+const STREAK_DATES_KEY = 'hermes-aizen-streak-dates'
+
+interface StreakData {
+  /** Current consecutive-day streak. */
+  current: number
+  /** Longest ever streak. */
+  best: number
+  /** Last recorded date (YYYY-MM-DD). */
+  lastDate: string
+}
+
+function todayKey(): string {
+  return new Date().toISOString().slice(0, 10) // YYYY-MM-DD
+}
+
+/** Load persisted streak data. */
+export function getStreakData(): StreakData {
+  try {
+    const raw = localStorage.getItem(STREAK_KEY)
+    return raw ? JSON.parse(raw) : { current: 0, best: 0, lastDate: '' }
+  } catch {
+    return { current: 0, best: 0, lastDate: '' }
+  }
+}
+
+/** Record today's session. Updates current streak and best streak. */
+export function recordSessionStart(): void {
+  startSessionTimer()
+
+  const today = todayKey()
+  const data = getStreakData()
+
+  if (data.lastDate === today) {
+    // Already recorded today — no-op.
+    return
+  }
+
+  // Check if yesterday was the last date (consecutive).
+  const yesterday = new Date()
+  yesterday.setDate(yesterday.getDate() - 1)
+  const yesterdayKey = yesterday.toISOString().slice(0, 10)
+
+  if (data.lastDate === yesterdayKey) {
+    // Consecutive day — increment streak.
+    data.current += 1
+  } else if (data.lastDate === '') {
+    // First ever session.
+    data.current = 1
+  } else {
+    // Streak broken — reset.
+    data.current = 1
+  }
+
+  data.best = Math.max(data.best, data.current)
+  data.lastDate = today
+
+  try {
+    localStorage.setItem(STREAK_KEY, JSON.stringify(data))
+  } catch {
+    // localStorage full — ignore.
+  }
+
+  // Also maintain a rolling log of active dates (last 30).
+  try {
+    const datesRaw = localStorage.getItem(STREAK_DATES_KEY)
+    const dates: string[] = datesRaw ? JSON.parse(datesRaw) : []
+    if (!dates.includes(today)) {
+      dates.push(today)
+      // Keep only the last 30 entries.
+      while (dates.length > 30) dates.shift()
+      localStorage.setItem(STREAK_DATES_KEY, JSON.stringify(dates))
+    }
+  } catch {
+    // Best effort.
+  }
+
+  // Auto-award streak badges.
+  if (data.current >= 7) {
+    earnBadge('streak-7')
+  }
+
+  // Check for midnight coding badge.
+  const hour = new Date().getHours()
+  if (hour >= 0 && hour < 5) {
+    try {
+      const midnightKey = 'hermes-aizen-midnight-count'
+      const count = parseInt(localStorage.getItem(midnightKey) || '0', 10) + 1
+      localStorage.setItem(midnightKey, String(count))
+      if (count >= 5) {
+        earnBadge('night-owl')
+      }
+    } catch {
+      // Ignore.
+    }
+  }
+}
+
+/** Get the list of active dates (last 30 days). */
+export function getActiveDates(): string[] {
+  try {
+    const raw = localStorage.getItem(STREAK_DATES_KEY)
+    return raw ? JSON.parse(raw) : []
+  } catch {
+    return []
+  }
+}

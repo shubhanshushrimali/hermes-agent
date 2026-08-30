@@ -8417,6 +8417,18 @@ class APIServerAdapter(BasePlatformAdapter):
             if self.gateway_runner is not None:
                 self._app["gateway_runner"] = self.gateway_runner
 
+            # Aizen extensions: mobile auth, MCP apps, recipes, IDE features.
+            # Registered after native routes so they never shadow upstream handlers.
+            try:
+                from gateway.aizen_extensions import register_aizen_extensions
+                register_aizen_extensions(
+                    self._app,
+                    get_agent_fn=lambda: getattr(self.gateway_runner, 'agent', None)
+                        if self.gateway_runner else None,
+                )
+            except Exception as _ext_err:
+                logger.debug("Aizen extensions not registered: %s", _ext_err)
+
             # Start background sweep to clean up orphaned (unconsumed) run streams
             sweep_task = asyncio.create_task(self._sweep_orphaned_runs())
             try:

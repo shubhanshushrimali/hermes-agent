@@ -159,6 +159,93 @@
   line-height: 1;
 }
 
+/* =======================================================================
+ * AUTO-TARGETING: Apply Aizen enhancements to real DOM elements
+ * when the Aizen theme is active (data-theme="aizen" on root).
+ *
+ * This avoids modifying dozens of Tailwind components — the CSS cascades
+ * automatically from the theme selection.
+ * ======================================================================= */
+
+/* Sidebar items: session list entries */
+[data-theme="aizen"] [data-sidebar-item],
+[data-theme="aizen"] nav a,
+[data-theme="aizen"] [role="treeitem"] {
+  transition: background 150ms ease, transform 100ms ease;
+}
+
+[data-theme="aizen"] [data-sidebar-item]:hover,
+[data-theme="aizen"] nav a:hover,
+[data-theme="aizen"] [role="treeitem"]:hover {
+  background: color-mix(in srgb, var(--dt-midground, #6366F1) 8%, transparent);
+}
+
+/* All buttons: micro press feedback */
+[data-theme="aizen"] button:not([disabled]) {
+  transition: transform 100ms ease, box-shadow 100ms ease;
+}
+
+[data-theme="aizen"] button:not([disabled]):active {
+  transform: scale(0.97);
+}
+
+/* All inputs and textareas: indigo focus glow */
+[data-theme="aizen"] input:focus,
+[data-theme="aizen"] textarea:focus,
+[data-theme="aizen"] [contenteditable]:focus {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--dt-midground, #6366F1) 25%, transparent);
+  outline: none;
+}
+
+/* Popover / dropdown: glassmorphism */
+[data-theme="aizen"] [data-radix-popper-content-wrapper] > *,
+[data-theme="aizen"] [role="dialog"],
+[data-theme="aizen"] [role="listbox"] {
+  background: color-mix(in srgb, var(--dt-background, #0B0D10) 85%, transparent) !important;
+  backdrop-filter: blur(12px) saturate(120%);
+  -webkit-backdrop-filter: blur(12px) saturate(120%);
+}
+
+/* Settings panel: subtle panel enter animation */
+[data-theme="aizen"] [role="tabpanel"] {
+  animation: aizen-panel-in 200ms ease-out forwards;
+}
+
+/* Sonner toast container: Aizen toast animation */
+[data-theme="aizen"] [data-sonner-toaster] [data-sonner-toast] {
+  animation: aizen-toast-in 250ms ease-out forwards;
+}
+
+/* Composer ring glow when agent is running */
+[data-theme="aizen"] [data-running="true"] [data-composer-ring],
+[data-theme="aizen"] .aizen-composer-streaming {
+  animation: aizen-composer-glow 1.5s ease-in-out infinite;
+}
+
+/* Code block containers: subtle left-border accent */
+[data-theme="aizen"] pre:has(code) {
+  border-left: 2px solid color-mix(in srgb, var(--dt-midground, #6366F1) 30%, transparent);
+}
+
+/* Scrollbar: themed for Aizen */
+[data-theme="aizen"] ::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+[data-theme="aizen"] ::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--dt-midground, #6366F1) 20%, transparent);
+  border-radius: 3px;
+}
+
+[data-theme="aizen"] ::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--dt-midground, #6366F1) 40%, transparent);
+}
+
+[data-theme="aizen"] ::-webkit-scrollbar-track {
+  background: transparent;
+}
+
 /* ---- Respect prefers-reduced-motion ---- */
 @media (prefers-reduced-motion: reduce) {
   .aizen-streaming-cursor::after,
@@ -169,7 +256,13 @@
   }
 
   .aizen-panel-enter,
-  .aizen-toast {
+  .aizen-toast,
+  [data-theme="aizen"] [role="tabpanel"],
+  [data-theme="aizen"] [data-sonner-toast] {
     animation-duration: 0.01ms !important;
+  }
+
+  [data-theme="aizen"] button:not([disabled]):active {
+    transform: none !important;
   }
 }
