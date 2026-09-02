@@ -29211,6 +29211,25 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 event_message_id=event_message_id,
             )
 
+        # ---- Langfuse Observability: trace the entire agent turn ----
+        _langfuse_trace = None
+        _langfuse_intent = ""
+        try:
+            from gateway.langfuse_integration import trace_turn, get_client
+            if get_client() is not None:
+                _langfuse_trace = get_client().trace(
+                    name="agent_turn",
+                    session_id=session_key or session_id,
+                    input=message[:500],
+                    metadata={
+                        "model": "",
+                        "platform": source.platform.value if hasattr(source, 'platform') else "",
+                        "interrupt_depth": _interrupt_depth,
+                    },
+                )
+        except Exception:
+            pass
+
         # ---- Aizen Graph Engine: enrich context before execution ----
         # Non-destructive: if anything fails, fall through to original path.
         try:
@@ -29220,6 +29239,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             if LANGGRAPH_AVAILABLE:
                 _intent = classify_intent_local(message)
                 _budget = get_budget()
+                _langfuse_intent = _intent.value
 
                 # Log the classification for observability.
                 try:
@@ -29233,6 +29253,18 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     )
                 except Exception:
                     pass
+
+                # Update Langfuse trace with classification.
+                if _langfuse_trace:
+                    try:
+                        _langfuse_trace.update(
+                            metadata={
+                                "intent": _intent.value,
+                                "budget_remaining": _budget.remaining_budget,
+                            }
+                        )
+                    except Exception:
+                        pass
 
                 # Inject codebase graph context for code/debug/refactor tasks.
                 if _intent.value in ("code", "debug", "refactor", "research"):
@@ -31079,6 +31111,30 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 )
             except Exception as _rpe:
                 logger.debug("Post-delivery cleanup registration failed: %s", _rpe)
+
+        # ---- Langfuse: close the trace with turn results ----
+        if _langfuse_trace is not None:
+            try:
+                _resp_text = ""
+                _api_calls = 0
+                if isinstance(response, dict):
+                    _resp_text = response.get("final_response", "")[:500]
+                    _api_calls = response.get("api_calls", 0)
+                _langfuse_trace.update(
+                    output=_resp_text,
+                    metadata={
+                        "intent": _langfuse_intent,
+                        "api_calls": _api_calls,
+                        "completed": response.get("completed", True) if isinstance(response, dict) else True,
+                    },
+                )
+                # Flush asynchronously — don't block the response.
+                from gateway.langfuse_integration import get_client as _lf_get
+                _lf_client = _lf_get()
+                if _lf_client:
+                    _lf_client.flush()
+            except Exception:
+                pass
 
         return response
 

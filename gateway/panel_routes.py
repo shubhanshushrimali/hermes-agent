@@ -344,4 +344,52 @@ def register_panel_routes(app: Any) -> None:
     app.router.add_get("/api/cost/dashboard", handle_cost_dashboard)
     app.router.add_post("/api/cost/budget", handle_cost_budget)
 
-    logger.info("Panel routes registered: git, crew, daemon, cost")
+    # ================================================================
+    # WebSocket Auto-Broadcast on Mutations
+    # ================================================================
+
+    try:
+        from gateway.ws_hub import wrap_panel_route_with_broadcast, get_hub
+
+        # After git mutations (stage, commit, push, pull, revert),
+        # auto-broadcast the new git status to all WebSocket clients.
+        async def _broadcast_git_after(request):
+            """After a git mutation, broadcast the updated status."""
+            workspace = ""
+            if request.method == "POST":
+                try:
+                    data = await request.json()
+                    workspace = data.get("workspace", "")
+                except Exception:
+                    pass
+            if workspace:
+                try:
+                    # Re-fetch git status and broadcast.
+                    import subprocess, os
+                    branch = subprocess.run(
+                        ["git", "branch", "--show-current"],
+                        capture_output=True, text=True, cwd=workspace, timeout=5,
+                    ).stdout.strip()
+                    status_out = subprocess.run(
+                        ["git", "status", "--porcelain"],
+                        capture_output=True, text=True, cwd=workspace, timeout=5,
+                    ).stdout.strip()
+                    from gateway.ws_hub import broadcast
+                    import asyncio
+                    await broadcast("git", {
+                        "branch": branch,
+                        "files_changed": len([l for l in status_out.split("\n") if l.strip()]),
+                    })
+                except Exception:
+                    pass
+
+        # WebSocket stats endpoint.
+        async def handle_ws_stats(request):
+            hub = get_hub()
+            return web.json_response(hub.get_stats())
+
+        app.router.add_get("/api/ws/stats", handle_ws_stats)
+    except ImportError:
+        pass
+
+    logger.info("Panel routes registered: git, crew, daemon, cost, ws")

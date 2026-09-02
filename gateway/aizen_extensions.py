@@ -283,6 +283,35 @@ def register_aizen_extensions(app: Any, get_agent_fn: Any = None) -> None:
     except Exception:
         pass
 
+    # WebSocket hub — real-time panel updates.
+    try:
+        from gateway.ws_hub import get_hub, PeriodicBroadcaster
+        hub = get_hub()
+        hub.register_routes(app)
+
+        # Start periodic broadcaster after the event loop is running.
+        async def _start_broadcaster(app_):
+            broadcaster = PeriodicBroadcaster(hub, interval=10.0)
+            app_["_ws_broadcaster"] = broadcaster
+            await broadcaster.start()
+
+        async def _stop_broadcaster(app_):
+            broadcaster = app_.get("_ws_broadcaster")
+            if broadcaster:
+                await broadcaster.stop()
+
+        app.on_startup.append(_start_broadcaster)
+        app.on_cleanup.append(_stop_broadcaster)
+    except Exception:
+        pass
+
+    # Initialize Langfuse tracing.
+    try:
+        from gateway.langfuse_integration import init_langfuse
+        init_langfuse()
+    except Exception:
+        pass
+
     logger.info("All Aizen extension routes registered")
 
 

@@ -79,6 +79,8 @@ class Job:
     retry_count: int = 0
     max_retries: int = 3
     metadata: Dict[str, Any] = field(default_factory=dict)
+    owner_pid: int = 0           # PID of the daemon that owns this job
+    heartbeat_at: str = ""       # Last heartbeat from the executing daemon
 
 
 class JobQueue:
@@ -116,7 +118,9 @@ class JobQueue:
                     error TEXT DEFAULT '',
                     retry_count INTEGER DEFAULT 0,
                     max_retries INTEGER DEFAULT 3,
-                    metadata TEXT DEFAULT '{}'
+                    metadata TEXT DEFAULT '{}',
+                    owner_pid INTEGER DEFAULT 0,
+                    heartbeat_at TEXT DEFAULT ''
                 )
             """)
             conn.execute("""
@@ -128,8 +132,23 @@ class JobQueue:
                 ON jobs(schedule) WHERE schedule != ''
             """)
             conn.commit()
+
+            # Migrate existing databases: add columns if missing.
+            self._migrate_add_columns(conn)
         finally:
             conn.close()
+
+    def _migrate_add_columns(self, conn: sqlite3.Connection):
+        """Add owner_pid and heartbeat_at columns to existing databases."""
+        cursor = conn.execute("PRAGMA table_info(jobs)")
+        columns = {row[1] for row in cursor.fetchall()}
+        if "owner_pid" not in columns:
+            conn.execute("ALTER TABLE jobs ADD COLUMN owner_pid INTEGER DEFAULT 0")
+            logger.info("Migrated: added owner_pid column")
+        if "heartbeat_at" not in columns:
+            conn.execute("ALTER TABLE jobs ADD COLUMN heartbeat_at TEXT DEFAULT ''")
+            logger.info("Migrated: added heartbeat_at column")
+        conn.commit()
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self._db_path)
@@ -175,16 +194,149 @@ class JobQueue:
             if not row:
                 return None
 
-            # Mark as running.
+            # Mark as running with owner PID and heartbeat.
             conn.execute("""
-                UPDATE jobs SET status = 'running', started_at = datetime('now')
+                UPDATE jobs SET status = 'running',
+                    started_at = datetime('now'),
+                    owner_pid = ?,
+                    heartbeat_at = datetime('now')
                 WHERE id = ?
-            """, (row["id"],))
+            """, (os.getpid(), row["id"]))
             conn.commit()
 
             return self._row_to_job(row)
         finally:
             conn.close()
+
+    def heartbeat(self, job_id: str) -> None:
+        """Update the heartbeat timestamp for a running job."""
+        conn = self._connect()
+        try:
+            conn.execute("""
+                UPDATE jobs SET heartbeat_at = datetime('now')
+                WHERE id = ? AND status = 'running'
+            """, (job_id,))
+            conn.commit()
+        finally:
+            conn.close()
+
+    def recover_stale_jobs(self, stale_threshold_seconds: int = 300) -> List[Job]:
+        """Recover jobs left in 'running' state after a crash.
+
+        A job is considered stale if:
+          1. Its owner PID is no longer alive, OR
+          2. Its heartbeat is older than stale_threshold_seconds.
+
+        Stale jobs under max_retries are re-queued as 'pending'.
+        Stale jobs at max_retries are marked 'failed'.
+
+        Returns the list of recovered jobs.
+        """
+        conn = self._connect()
+        recovered = []
+        try:
+            rows = conn.execute("""
+                SELECT * FROM jobs WHERE status = 'running'
+            """).fetchall()
+
+            for row in rows:
+                is_stale = False
+                reason = ""
+
+                # Check 1: Is the owner PID still alive?
+                owner_pid = row["owner_pid"] if "owner_pid" in row.keys() else 0
+                if owner_pid and owner_pid != os.getpid():
+                    if not self._is_pid_alive(owner_pid):
+                        is_stale = True
+                        reason = f"owner PID {owner_pid} is dead"
+                elif owner_pid == 0:
+                    # Legacy job with no PID — check heartbeat.
+                    is_stale = True
+                    reason = "no owner PID recorded (legacy job)"
+
+                # Check 2: Is the heartbeat stale?
+                if not is_stale:
+                    heartbeat_str = row["heartbeat_at"] if "heartbeat_at" in row.keys() else ""
+                    if heartbeat_str:
+                        try:
+                            heartbeat_time = datetime.fromisoformat(heartbeat_str)
+                            age = (datetime.now() - heartbeat_time).total_seconds()
+                            if age > stale_threshold_seconds:
+                                is_stale = True
+                                reason = f"heartbeat stale ({int(age)}s old, threshold={stale_threshold_seconds}s)"
+                        except ValueError:
+                            is_stale = True
+                            reason = "unparseable heartbeat timestamp"
+                    else:
+                        # No heartbeat recorded — treat as stale.
+                        is_stale = True
+                        reason = "no heartbeat recorded"
+
+                if not is_stale:
+                    continue
+
+                job = self._row_to_job(row)
+
+                if job.retry_count < job.max_retries:
+                    # Re-queue for retry.
+                    conn.execute("""
+                        UPDATE jobs SET status = 'pending',
+                            retry_count = retry_count + 1,
+                            error = ?,
+                            owner_pid = 0,
+                            heartbeat_at = ''
+                        WHERE id = ?
+                    """, (f"Auto-resumed after crash: {reason}", job.id))
+                    logger.info(
+                        "Auto-resumed job %s (%s) — %s (retry %d/%d)",
+                        job.id, job.name, reason,
+                        job.retry_count + 1, job.max_retries,
+                    )
+                else:
+                    # Max retries exhausted — mark failed.
+                    conn.execute("""
+                        UPDATE jobs SET status = 'failed',
+                            completed_at = datetime('now'),
+                            error = ?,
+                            owner_pid = 0,
+                            heartbeat_at = ''
+                        WHERE id = ?
+                    """, (f"Max retries exhausted after crash: {reason}", job.id))
+                    logger.warning(
+                        "Job %s (%s) failed permanently — %s (retries exhausted: %d/%d)",
+                        job.id, job.name, reason,
+                        job.retry_count, job.max_retries,
+                    )
+
+                recovered.append(job)
+
+            conn.commit()
+        finally:
+            conn.close()
+
+        return recovered
+
+    @staticmethod
+    def _is_pid_alive(pid: int) -> bool:
+        """Check if a process with the given PID is still running."""
+        if pid <= 0:
+            return False
+        try:
+            if sys.platform == "win32":
+                import ctypes
+                kernel32 = ctypes.windll.kernel32
+                handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+                if handle:
+                    kernel32.CloseHandle(handle)
+                    return True
+                return False
+            else:
+                os.kill(pid, 0)  # Signal 0: doesn't kill, just checks.
+                return True
+        except (OSError, ProcessLookupError):
+            return False
+        except Exception:
+            return False  # If we can't check, assume dead.
 
     def complete(self, job_id: str, result: str = "") -> None:
         """Mark a job as completed."""
@@ -280,6 +432,7 @@ class JobQueue:
             conn.close()
 
     def _row_to_job(self, row) -> Job:
+        keys = row.keys() if hasattr(row, 'keys') else []
         return Job(
             id=row["id"], name=row["name"], prompt=row["prompt"],
             status=row["status"], priority=row["priority"],
@@ -289,6 +442,8 @@ class JobQueue:
             result=row["result"] or "", error=row["error"] or "",
             retry_count=row["retry_count"], max_retries=row["max_retries"],
             metadata=json.loads(row["metadata"] or "{}"),
+            owner_pid=row["owner_pid"] if "owner_pid" in keys else 0,
+            heartbeat_at=row["heartbeat_at"] or "" if "heartbeat_at" in keys else "",
         )
 
 
@@ -360,9 +515,11 @@ class DaemonRunner:
         heartbeat_interval: int = 30,
         max_daily_spend: float = 10.0,
         db_path: str = None,
+        stale_threshold: int = 300,
     ):
         self.heartbeat_interval = heartbeat_interval
         self.max_daily_spend = max_daily_spend
+        self._stale_threshold = stale_threshold  # seconds before a job is considered orphaned
         self.queue = JobQueue(db_path)
         self._running = False
         self._start_time = time.time()
@@ -395,8 +552,8 @@ class DaemonRunner:
         """Main daemon loop. Process jobs until stopped."""
         self._running = True
         self._start_time = time.time()
-        logger.info("Daemon started. Heartbeat every %ds, budget $%.2f/day",
-                    self.heartbeat_interval, self.max_daily_spend)
+        logger.info("Daemon started (PID %d). Heartbeat every %ds, budget $%.2f/day",
+                    os.getpid(), self.heartbeat_interval, self.max_daily_spend)
 
         # Handle graceful shutdown.
         try:
@@ -408,6 +565,30 @@ class DaemonRunner:
                     pass  # Windows doesn't support add_signal_handler
         except Exception:
             pass
+
+        # ---- Auto-resume: recover jobs orphaned by a previous crash ----
+        recovered = self.queue.recover_stale_jobs(
+            stale_threshold_seconds=self._stale_threshold,
+        )
+        if recovered:
+            logger.info(
+                "Auto-resumed %d orphaned job(s): %s",
+                len(recovered),
+                ", ".join(f"{j.id} ({j.name})" for j in recovered),
+            )
+            # Notify connected dashboard clients.
+            try:
+                from gateway.ws_hub import broadcast_sync
+                broadcast_sync("daemon", {
+                    "event": "auto_resume",
+                    "recovered_count": len(recovered),
+                    "recovered_jobs": [
+                        {"id": j.id, "name": j.name, "retry": j.retry_count + 1}
+                        for j in recovered
+                    ],
+                })
+            except Exception:
+                pass
 
         while self._running:
             try:
@@ -438,6 +619,8 @@ class DaemonRunner:
                 logger.error("Daemon loop error: %s", e, exc_info=True)
                 await asyncio.sleep(5)  # Brief pause before retry.
 
+        # ---- Graceful shutdown: mark our running jobs as interrupted ----
+        self._mark_own_jobs_interrupted()
         logger.info("Daemon stopped. Processed %d jobs.", self._jobs_processed)
 
     def stop(self):
@@ -445,9 +628,78 @@ class DaemonRunner:
         self._running = False
         logger.info("Daemon stop requested")
 
+    def _mark_own_jobs_interrupted(self):
+        """On graceful shutdown, re-queue any jobs this daemon was running.
+
+        Unlike a crash (where recover_stale_jobs handles it on next boot),
+        this runs inline during a clean stop so the jobs are immediately
+        available for the next daemon instance.
+        """
+        my_pid = os.getpid()
+        conn = self.queue._connect()
+        try:
+            rows = conn.execute("""
+                SELECT id, name, retry_count, max_retries FROM jobs
+                WHERE status = 'running' AND owner_pid = ?
+            """, (my_pid,)).fetchall()
+
+            for row in rows:
+                if row["retry_count"] < row["max_retries"]:
+                    conn.execute("""
+                        UPDATE jobs SET status = 'pending',
+                            retry_count = retry_count + 1,
+                            error = 'Interrupted by graceful shutdown',
+                            owner_pid = 0,
+                            heartbeat_at = ''
+                        WHERE id = ?
+                    """, (row["id"],))
+                    logger.info("Re-queued interrupted job: %s (%s)", row["id"], row["name"])
+                else:
+                    conn.execute("""
+                        UPDATE jobs SET status = 'failed',
+                            completed_at = datetime('now'),
+                            error = 'Interrupted by graceful shutdown (retries exhausted)',
+                            owner_pid = 0,
+                            heartbeat_at = ''
+                        WHERE id = ?
+                    """, (row["id"],))
+                    logger.warning("Failed interrupted job: %s (%s) — retries exhausted", row["id"], row["name"])
+
+            conn.commit()
+            if rows:
+                logger.info("Graceful shutdown: handled %d in-flight job(s)", len(rows))
+        except Exception as e:
+            logger.debug("Failed to mark interrupted jobs: %s", e)
+        finally:
+            conn.close()
+
     async def _execute_job(self, job: Job):
-        """Execute a single job through the graph engine."""
+        """Execute a single job through the graph engine.
+
+        Runs a background heartbeat thread so other daemon instances
+        (or the next restart) can distinguish live jobs from crashed ones.
+        """
+        import threading
+
         logger.info("Executing job: %s (%s)", job.id, job.name)
+
+        # Start heartbeat thread — keeps heartbeat_at fresh every 60s.
+        heartbeat_stop = threading.Event()
+
+        def _heartbeat_worker():
+            while not heartbeat_stop.is_set():
+                try:
+                    self.queue.heartbeat(job.id)
+                except Exception:
+                    pass
+                heartbeat_stop.wait(timeout=60.0)
+
+        hb_thread = threading.Thread(
+            target=_heartbeat_worker,
+            name=f"daemon-hb-{job.id[:12]}",
+            daemon=True,
+        )
+        hb_thread.start()
 
         try:
             # Try graph engine first.
@@ -468,6 +720,9 @@ class DaemonRunner:
         except Exception as e:
             logger.error("Job failed: %s — %s", job.id, e)
             self.queue.fail(job.id, error=str(e))
+        finally:
+            heartbeat_stop.set()
+            hb_thread.join(timeout=5.0)
 
     def _check_scheduled_jobs(self):
         """Check if any scheduled jobs need to be triggered."""

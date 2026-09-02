@@ -43,6 +43,7 @@ import { discoverRuntimePlugins } from '@/contrib/runtime-loader'
 import { translateNow } from '@/i18n'
 import { NEW_SESSION_TITLE, sessionTitle as storedSessionTitle } from '@/lib/chat-runtime'
 import { Download, FileText, LayoutDashboard, PanelBottom, PanelTop, Terminal, Upload, Zap } from '@/lib/icons'
+import { Activity, BarChart3, Clipboard, CreditCard, Cpu, Eye, GitBranch, Users } from '@/lib/icons'
 import { type KeybindContribution, KEYBINDS_AREA } from '@/lib/keybinds/actions'
 import { TRANSCRIPT_DIRECTIVE_AREA, type TranscriptDirectiveContribution } from '@/lib/transcript-directives'
 import { setYoloEnabled } from '@/lib/yolo-session'
@@ -792,6 +793,63 @@ registry.register(
     set: () => togglePaneVisible('logs')
   })
 )
+
+// ---------------------------------------------------------------------------
+// Aizen intelligence panels — ⌘K palette toggles.
+// Each panel registered above as a pane contribution gets a palette row here
+// so users can open/close them from the keyboard (⌘K → type panel name).
+// ---------------------------------------------------------------------------
+
+registry.registerMany([
+  paletteToggle({
+    id: 'aizen.toggleGit',
+    label: 'Toggle git panel',
+    icon: GitBranch,
+    keywords: ['git', 'branch', 'commit', 'diff', 'vcs', 'source control', 'aizen'],
+    get: () => isPaneVisible('aizen-git'),
+    set: () => togglePaneVisible('aizen-git')
+  }),
+  paletteToggle({
+    id: 'aizen.toggleCrew',
+    label: 'Toggle crew panel',
+    icon: Users,
+    keywords: ['crew', 'agents', 'crewai', 'team', 'multi-agent', 'aizen'],
+    get: () => isPaneVisible('aizen-crew'),
+    set: () => togglePaneVisible('aizen-crew')
+  }),
+  paletteToggle({
+    id: 'aizen.toggleDaemon',
+    label: 'Toggle daemon panel',
+    icon: Cpu,
+    keywords: ['daemon', 'cron', 'background', 'jobs', 'scheduler', '24/7', 'aizen'],
+    get: () => isPaneVisible('aizen-daemon'),
+    set: () => togglePaneVisible('aizen-daemon')
+  }),
+  paletteToggle({
+    id: 'aizen.toggleCost',
+    label: 'Toggle cost panel',
+    icon: CreditCard,
+    keywords: ['cost', 'budget', 'spending', 'tokens', 'usage', 'dollars', 'aizen'],
+    get: () => isPaneVisible('aizen-cost'),
+    set: () => togglePaneVisible('aizen-cost')
+  }),
+  paletteToggle({
+    id: 'aizen.togglePlan',
+    label: 'Toggle plan panel',
+    icon: Clipboard,
+    keywords: ['plan', 'steps', 'breakdown', 'strategy', 'roadmap', 'aizen'],
+    get: () => isPaneVisible('aizen-plan'),
+    set: () => togglePaneVisible('aizen-plan')
+  }),
+  paletteToggle({
+    id: 'aizen.togglePreview',
+    label: 'Toggle preview panel',
+    icon: Eye,
+    keywords: ['preview', 'live', 'iframe', 'browser', 'render', 'aizen'],
+    get: () => isPaneVisible('aizen-preview'),
+    set: () => togglePaneVisible('aizen-preview')
+  }),
+])
 
 // Hide-only chrome tabs (sessions / Bots) get a ⌘K toggle each — the palette
 // door onto the same show/hide the zone menu offers. Auto-registered from the

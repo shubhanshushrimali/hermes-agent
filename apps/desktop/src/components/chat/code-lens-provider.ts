@@ -9,8 +9,52 @@
  * Part of Phase 4: IDE-Grade Code Experience.
  */
 
-type Monaco = typeof import('monaco-editor')
-type ITextModel = import('monaco-editor').editor.ITextModel
+// ---------------------------------------------------------------------------
+// Minimal Monaco type stubs — avoids hard dependency on monaco-editor package.
+// The real types flow through at runtime when Monaco is loaded dynamically.
+// ---------------------------------------------------------------------------
+
+interface MonacoRange {
+  startLineNumber: number
+  startColumn: number
+  endLineNumber: number
+  endColumn: number
+}
+
+interface MonacoCommand {
+  id: string
+  title: string
+  arguments?: unknown[]
+}
+
+interface MonacoCodeLens {
+  range: MonacoRange
+  command?: MonacoCommand
+}
+
+interface MonacoCodeLensProvider {
+  provideCodeLenses: (model: MonacoTextModel) => { lenses: MonacoCodeLens[]; dispose: () => void }
+  resolveCodeLens: (model: MonacoTextModel, codeLens: MonacoCodeLens) => MonacoCodeLens
+}
+
+interface MonacoTextModel {
+  getLanguageId: () => string
+  getValue: () => string
+}
+
+interface MonacoDisposable {
+  dispose: () => void
+}
+
+/** The Monaco module namespace — only the slice we need. */
+interface MonacoNamespace {
+  languages: {
+    registerCodeLensProvider: (
+      languageSelector: string,
+      provider: MonacoCodeLensProvider
+    ) => MonacoDisposable
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Declaration patterns per language family
@@ -170,18 +214,19 @@ function findDeclarations(text: string, language: string): CodeLensDeclaration[]
  * @returns A disposable to unregister the provider.
  */
 export function registerCodeLensProvider(
-  monaco: Monaco,
+  monaco: MonacoNamespace,
   onAction: (prompt: string) => void
-): import('monaco-editor').IDisposable {
-  let commandIds: string[] = []
+): MonacoDisposable {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const commandIds: string[] = []
 
   const provider = monaco.languages.registerCodeLensProvider('*', {
-    provideCodeLenses: (model) => {
+    provideCodeLenses: (model: MonacoTextModel) => {
       const language = model.getLanguageId()
       const text = model.getValue()
       const declarations = findDeclarations(text, language)
 
-      const lenses: import('monaco-editor').languages.CodeLens[] = []
+      const lenses: MonacoCodeLens[] = []
 
       for (const decl of declarations) {
         for (const action of ACTIONS) {
@@ -204,7 +249,7 @@ export function registerCodeLensProvider(
       return { lenses, dispose: () => {} }
     },
 
-    resolveCodeLens: (_model, codeLens) => codeLens,
+    resolveCodeLens: (_model: MonacoTextModel, codeLens: MonacoCodeLens) => codeLens,
   })
 
   // Register commands for each action.

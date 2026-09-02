@@ -1,25 +1,78 @@
-# Hermes Agent — Aizen Version: Enhanced Docker Compose
-# Adds code-server, Caddy reverse proxy, and mobile PWA
-# Usage: docker compose -f docker-compose.yml -f docker-compose.aizen.yml up
+# Hermes Agent — Aizen Version: Complete Docker Compose
+# ONE COMMAND: docker compose -f docker-compose.aizen.yml up -d
+#
+# This deploys the full stack:
+#   - Gateway + Dashboard (core agent)
+#   - Mobile PWA (served by Caddy)
+#   - Code Server (VS Code in browser)
+#   - Caddy (reverse proxy + HTTPS)
+#   - Langfuse (observability)
+#   - Postgres (Langfuse backend)
+#
+# All services on one network, all data persisted in named volumes.
+# Set HERMES_UID/HERMES_GID to match your host user (default: 10000).
 
 services:
-  # Full VS Code in the browser via code-server
-  code-server:
-    image: codercom/code-server:latest
-    container_name: hermes-code-server
+  # ================================================================
+  # Core: Gateway + Agent
+  # ================================================================
+  gateway:
+    build: .
+    image: hermes-agent
+    container_name: hermes-gateway
     restart: unless-stopped
     ports:
-      - "8443:8080"
+      - "5005:5005"
     volumes:
-      - ./workspace:/home/coder/project
-      - code-server-data:/home/coder/.local
+      - ~/.hermes:/opt/data
+      - hermes-workspace:/workspace
     environment:
-      - PASSWORD=${CODE_SERVER_PASSWORD:-hermes}
-      - SUDO_PASSWORD=${CODE_SERVER_SUDO_PASSWORD:-hermes}
+      - HERMES_UID=${HERMES_UID:-10000}
+      - HERMES_GID=${HERMES_GID:-10000}
+      - HERMES_WORKSPACE=/workspace
+      # Langfuse auto-config (matches docker/langfuse.yml seeds).
+      - LANGFUSE_HOST=http://langfuse:3000
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-pk-lf-hermes-local}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-sk-lf-hermes-local}
+      # API server for PWA access.
+      - API_SERVER_HOST=0.0.0.0
+      - API_SERVER_KEY=${API_SERVER_KEY:-hermes-local-key}
+    depends_on:
+      langfuse:
+        condition: service_healthy
+    command: ["gateway", "run"]
+    networks:
+      - hermes-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:5005/api/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ================================================================
+  # Dashboard
+  # ================================================================
+  dashboard:
+    image: hermes-agent
+    container_name: hermes-dashboard
+    restart: unless-stopped
+    ports:
+      - "9119:9119"
+    depends_on:
+      gateway:
+        condition: service_healthy
+    volumes:
+      - ~/.hermes:/opt/data
+    environment:
+      - HERMES_UID=${HERMES_UID:-10000}
+      - HERMES_GID=${HERMES_GID:-10000}
+    command: ["dashboard", "--host", "0.0.0.0", "--no-open"]
     networks:
       - hermes-net
 
-  # Caddy reverse proxy — automatic HTTPS + mobile PWA serving
+  # ================================================================
+  # Mobile PWA (static files served by Caddy)
+  # ================================================================
   caddy:
     image: caddy:latest
     container_name: hermes-caddy
@@ -29,18 +82,97 @@ services:
       - "443:443"
     volumes:
       - ./Caddyfile.aizen:/etc/caddy/Caddyfile:ro
+      - ./apps/mobile-pwa/public:/srv/pwa:ro
       - caddy-data:/data
       - caddy-config:/config
-      - ./apps/mobile-web:/srv/mobile:ro
-      - ./apps/desktop/public/aizen-avatar.jpg:/srv/mobile/aizen-avatar.jpg:ro
     networks:
       - hermes-net
 
+  # ================================================================
+  # Code Server (VS Code in browser)
+  # ================================================================
+  code-server:
+    image: codercom/code-server:latest
+    container_name: hermes-code-server
+    restart: unless-stopped
+    ports:
+      - "8443:8080"
+    volumes:
+      - hermes-workspace:/home/coder/project
+      - code-server-data:/home/coder/.local
+    environment:
+      - PASSWORD=${CODE_SERVER_PASSWORD:-hermes}
+      - SUDO_PASSWORD=${CODE_SERVER_SUDO_PASSWORD:-hermes}
+    networks:
+      - hermes-net
+
+  # ================================================================
+  # Langfuse (Observability)
+  # ================================================================
+  langfuse:
+    image: langfuse/langfuse:latest
+    container_name: hermes-langfuse
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: "postgresql://langfuse:langfuse@langfuse-db:5432/langfuse"
+      NEXTAUTH_SECRET: "${LANGFUSE_NEXTAUTH_SECRET:-hermes-aizen-secret-change-in-production}"
+      SALT: "${LANGFUSE_SALT:-hermes-aizen-salt-change-in-production}"
+      NEXTAUTH_URL: "http://localhost:3000"
+      TELEMETRY_ENABLED: "false"
+      # Pre-seed org, project, and API keys on first boot.
+      LANGFUSE_INIT_ORG_ID: "hermes-org"
+      LANGFUSE_INIT_ORG_NAME: "Hermes Agent"
+      LANGFUSE_INIT_PROJECT_ID: "hermes-project"
+      LANGFUSE_INIT_PROJECT_NAME: "Hermes Agent"
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: "${LANGFUSE_PUBLIC_KEY:-pk-lf-hermes-local}"
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: "${LANGFUSE_SECRET_KEY:-sk-lf-hermes-local}"
+      LANGFUSE_INIT_USER_EMAIL: "admin@hermes.local"
+      LANGFUSE_INIT_USER_NAME: "Hermes Admin"
+      LANGFUSE_INIT_USER_PASSWORD: "${LANGFUSE_ADMIN_PASSWORD:-hermes-admin}"
+    depends_on:
+      langfuse-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:3000 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - hermes-net
+
+  langfuse-db:
+    image: postgres:16-alpine
+    container_name: hermes-langfuse-db
+    restart: unless-stopped
+    volumes:
+      - langfuse-db-data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: langfuse
+      POSTGRES_PASSWORD: langfuse
+      POSTGRES_DB: langfuse
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U langfuse"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - hermes-net
+
+# ================================================================
+# Volumes
+# ================================================================
 volumes:
+  hermes-workspace:
   code-server-data:
   caddy-data:
   caddy-config:
+  langfuse-db-data:
 
+# ================================================================
+# Network
+# ================================================================
 networks:
   hermes-net:
     driver: bridge
