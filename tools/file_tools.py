@@ -2173,6 +2173,77 @@ def _mark_verification_stale(
         logger.debug("verification stale marker failed", exc_info=True)
 
 
+def _attach_post_edit_verify(
+    result_dict: dict,
+    paths: list[str],
+    task_id: str = "default",
+) -> None:
+    """Attach LSP + discovered test command as the verify step after a successful edit.
+
+    Does not run tests. The model must choose and execute a command.
+    """
+    if result_dict.get("error"):
+        return
+    try:
+        from agent.coding_context import project_facts_for
+
+        commands: list[str] = []
+        for path in paths:
+            if not path:
+                continue
+            try:
+                candidate = str(Path(path).parent)
+            except Exception:
+                continue
+            facts = project_facts_for(candidate)
+            if facts:
+                commands = list(facts.get("verifyCommands") or [])
+                break
+        result_dict["verify"] = {
+            "lsp": result_dict.get("lsp_diagnostics"),
+            "commands": commands,
+            "hint": (
+                "Treat lsp_diagnostics as the first verify step. "
+                "Then run one of commands yourself — this payload does not execute tests."
+                if commands
+                else "Check lsp_diagnostics on this result; no project test command was detected."
+            ),
+        }
+    except Exception:
+        logger.debug("post-edit verify attach failed", exc_info=True)
+    _notify_codebase_graph(paths, task_id=task_id)
+
+
+def _notify_codebase_graph(paths: list[str], task_id: str = "default") -> None:
+    """Reindex edited files in the knowledge graph. Never blocks the write.
+
+    Inline import: file_tools loads before gateway graph modules; a top-level
+    import would create a circular import through the agent tool registry.
+    """
+    try:
+        from gateway.codebase_graph import get_graph_manager
+    except Exception:
+        return
+    workspace = _authoritative_workspace_root(task_id)
+    manager = get_graph_manager()
+    for path in paths:
+        if not path:
+            continue
+        ws = workspace
+        if not ws:
+            try:
+                from agent.coding_context import project_facts_for
+
+                facts = project_facts_for(str(Path(path).parent))
+                ws = str(facts["root"]) if facts and facts.get("root") else str(Path(path).parent)
+            except Exception:
+                ws = str(Path(path).parent)
+        try:
+            manager.index_file(ws, path)
+        except Exception:
+            logger.debug("codebase graph incremental index failed", exc_info=True)
+
+
 def _check_binary_document_write(filepath: str, task_id: str = "default") -> str | None:
     """Reject text-tool writes that would corrupt a binary document.
 
@@ -2269,6 +2340,7 @@ def write_file_tool(path: str, content: str, task_id: str = "default",
             if not result_dict.get("error"):
                 _mark_verification_stale(task_id, [path], session_id=session_id)
             _update_read_timestamp(path, task_id)
+            _attach_post_edit_verify(result_dict, [path], task_id=task_id)
             return json.dumps(result_dict, ensure_ascii=False)
 
         # Serialize the read→modify→write region per-path so concurrent
@@ -2300,6 +2372,7 @@ def write_file_tool(path: str, content: str, task_id: str = "default",
             _update_read_timestamp(path, task_id)
             if not result_dict.get("error"):
                 file_state.note_write(task_id, _resolved)
+        _attach_post_edit_verify(result_dict, [_resolved], task_id=task_id)
         return json.dumps(result_dict, ensure_ascii=False)
     except Exception as e:
         if _is_expected_write_exception(e):
@@ -2524,6 +2597,7 @@ def patch_tool(mode: str = "replace", path: str = None, old_string: str = None,
                     "old_string not found. Use read_file to verify the current "
                     "content, or search_files to locate the text."
                 )
+        _attach_post_edit_verify(result_dict, _resolved_modified, task_id=task_id)
         return json.dumps(result_dict, ensure_ascii=False)
     except Exception as e:
         return tool_error(str(e))

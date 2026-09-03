@@ -2428,6 +2428,8 @@ export const en: Translations = {
     previewLabel: label => `Preview ${label}`,
     couldNotPreview: label => `Could not preview ${label}`,
     removeAttachment: label => `Remove ${label}`,
+    editorContext: 'Editor context',
+    editorContextWithFile: file => `Editor · ${file}`,
     dictating: 'Dictating',
     preparingAudio: 'Preparing audio',
     speakingResponse: 'Speaking response',
@@ -2518,6 +2520,17 @@ export const en: Translations = {
     stop: 'Stop',
     dismiss: 'Dismiss',
     exit: code => `exit ${code}`,
+    sessionBusy: 'Hermes is working',
+    sessionBusyHint: 'Not hung — send to steer, or wait.',
+    sessionBusySteer: 'Steer',
+    spendCap: 'Daily spend cap reached',
+    spendCapHint: 'Today’s budget is used up, so Hermes stopped on purpose.',
+    graphIndex: 'Code graph',
+    graphIndexHint: 'Index is ready.',
+    graphIndexMissing: 'This folder is not indexed yet.',
+    graphIndexRegex: 'Simple index — Graphify is unavailable.',
+    graphIndexStale: 'Files changed since the last index.',
+    graphIndexReindex: 'Reindex',
     coding: {
       title: 'Working tree',
       noBranch: 'No branch',
@@ -2562,7 +2575,8 @@ export const en: Translations = {
       branchOffFrom: base => `New branch from ${base}`,
       switchTo: branch => `Switch to ${branch}`,
       switchFailed: branch => `Could not switch to ${branch}`,
-      worktrees: 'Worktrees'
+      worktrees: 'Worktrees',
+      runTests: 'Run tests'
     }
   },
 
@@ -2721,8 +2735,8 @@ export const en: Translations = {
   },
 
   onboarding: {
-    headerTitle: "Let's get you setup with Hermes Agent",
-    headerDesc: 'Connect a model provider to start chatting. Most options take one click.',
+    headerTitle: "Let's get you set up",
+    headerDesc: 'Pick a folder, choose a model, then send your first prompt.',
     preparingInstall: 'Hermes is finishing install. This usually takes under a minute on first run.',
     starting: 'Starting Hermes…',
     lookingUpProviders: 'Looking up providers...',
@@ -2794,7 +2808,23 @@ export const en: Translations = {
     price: (input, output) => `${input} in / ${output} out per Mtok`,
     change: 'Change',
     startChatting: 'Begin',
-    docs: provider => `${provider} docs`
+    docs: provider => `${provider} docs`,
+    folderTitle: 'Pick a folder',
+    folderDesc: 'This is the project Hermes will work in.',
+    chooseFolder: 'Choose folder',
+    chooseModel: 'Choose model',
+    next: 'Continue',
+    skip: 'Skip',
+    modelTitle: 'Pick a model',
+    modelDesc: 'You can change this any time from the composer.',
+    needKey: 'I need an API key first',
+    firstPromptTitle: 'First prompt',
+    firstPromptDesc: 'Tell Hermes what you want to work on.',
+    firstPromptPlaceholder: 'What are we building?',
+    sendFirstPrompt: 'Start chatting',
+    stepFolder: 'Folder',
+    stepModel: 'Model',
+    stepPrompt: 'Prompt'
   },
 
   modelPicker: {

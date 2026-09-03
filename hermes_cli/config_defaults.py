@@ -54,6 +54,16 @@ DEFAULT_CONFIG = {
         # implicit provider stale timeouts are capped to the remaining
         # budget. CLI one-shot equivalent: `hermes chat --run-budget N`.
         "run_budget_seconds": None,
+        # Daily USD cap for the core turn loop (same singleton as the cost
+        # dashboard). Default $10 matches the historical BudgetGuard. null/0
+        # disables the daily hard-stop. At 80% the model gets a wrap-up
+        # notice; at 100% the loop stops before the next provider call.
+        "max_daily_cost_usd": 10.0,
+        # Optional per-session estimated USD cap (this agent instance).
+        # null = off. Independent of the daily cap.
+        "max_session_cost_usd": None,
+        # Optional billed-token cap (session_total_tokens). null = off.
+        "max_session_tokens": None,
         # Inactivity timeout for gateway agent execution (seconds).
         # The agent can run indefinitely as long as it's actively calling
         # tools or receiving API responses.  Only fires when the agent has
@@ -221,17 +231,17 @@ DEFAULT_CONFIG = {
         # app, ACP) in a code workspace, Hermes adds a coding operating brief
         # + a live git/workspace snapshot to the system prompt. See
         # agent/coding_context.py.
-        #   "auto" (default) — prompt-only posture when the surface is
+        #   "focus" (default) — auto + collapse the toolset to the lean coding
+        #                      set (+ enabled MCP servers) + demote non-coding
+        #                      skill categories to names-only in the prompt's
+        #                      skill index.
+        #   "auto"           — prompt-only posture when the surface is
         #                      interactive AND cwd is a code workspace.
         #                      Toolsets are never touched; messaging platforms
         #                      unaffected.
-        #   "focus"          — auto + collapse the toolset to the lean coding
-        #                      set (+ enabled MCP servers) + demote non-coding
-        #                      skill categories to names-only in the prompt's
-        #                      skill index. Explicit opt-in.
         #   "on"             — force the prompt posture everywhere.
         #   "off"            — disable entirely.
-        "coding_context": "auto",
+        "coding_context": "focus",
         # Standing operator instructions for the coding posture. A string (or
         # list of strings) appended to the coding brief as an extra stable
         # system block — pin project-wide workflow rules here instead of editing

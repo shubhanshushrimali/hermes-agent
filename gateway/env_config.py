@@ -86,7 +86,7 @@ def log_startup_status() -> None:
         import graphify
         logger.info("  Graphify:  ON")
     except ImportError:
-        logger.info("  Graphify:  OFF (pip install graphifyy)")
+        logger.info("  Graphify:  OFF (pip install graphify)")
 
     logger.info("========================================")
 

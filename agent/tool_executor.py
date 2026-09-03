@@ -670,6 +670,17 @@ def _run_agent_tool_execution_middleware(
                 else authorization_gate.run(_resolve_pre_tool_block)
             )
 
+        if block_message is None:
+            try:
+                from agent.consequence_gate import consequence_pre_tool_block
+
+                consequence_block = consequence_pre_tool_block(agent, function_name)
+                if consequence_block:
+                    block_message = consequence_block
+                    block_error_type = "consequence_gate"
+            except Exception:
+                pass
+
         guardrail_decision = None
         if block_message is None:
             guardrail_decision = agent._tool_guardrails.before_call(

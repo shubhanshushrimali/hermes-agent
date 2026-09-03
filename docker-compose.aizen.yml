@@ -9,7 +9,14 @@
 #   - Langfuse (observability)
 #   - Postgres (Langfuse backend)
 #
-# All services on one network, all data persisted in named volumes.
+# All services on one network, all data persisted in named volumes
+# (hermes-home, not a ~/.hermes bind mount — that does not expand on
+# Windows Docker Desktop). After up:
+#   PWA:        http://localhost/
+#   Dashboard:  http://localhost:9119
+#   Gateway:    http://localhost:5005/health
+#
+# Native-port stack without Caddy/PWA: docker-compose.windows.yml
 # Set HERMES_UID/HERMES_GID to match your host user (default: 10000).
 
 services:
@@ -24,7 +31,7 @@ services:
     ports:
       - "5005:5005"
     volumes:
-      - ~/.hermes:/opt/data
+      - hermes-home:/opt/data
       - hermes-workspace:/workspace
     environment:
       - HERMES_UID=${HERMES_UID:-10000}
@@ -34,9 +41,13 @@ services:
       - LANGFUSE_HOST=http://langfuse:3000
       - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-pk-lf-hermes-local}
       - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-sk-lf-hermes-local}
-      # API server for PWA access.
+      # API server for PWA access. Port MUST match the published mapping.
+      # The PWA uses same-origin when Caddy serves it on :80; native
+      # Hermes listens on 8642.
       - API_SERVER_HOST=0.0.0.0
+      - API_SERVER_PORT=5005
       - API_SERVER_KEY=${API_SERVER_KEY:-hermes-local-key}
+      - API_SERVER_CORS_ORIGINS=*
     depends_on:
       langfuse:
         condition: service_healthy
@@ -44,7 +55,7 @@ services:
     networks:
       - hermes-net
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:5005/api/health || exit 1"]
+      test: ["CMD-SHELL", "curl -sf http://localhost:5005/health || curl -sf http://localhost:5005/api/health || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 3
@@ -62,11 +73,11 @@ services:
       gateway:
         condition: service_healthy
     volumes:
-      - ~/.hermes:/opt/data
+      - hermes-home:/opt/data
     environment:
       - HERMES_UID=${HERMES_UID:-10000}
       - HERMES_GID=${HERMES_GID:-10000}
-    command: ["dashboard", "--host", "0.0.0.0", "--no-open"]
+    command: ["dashboard", "--host", "0.0.0.0", "--no-open", "--insecure"]
     networks:
       - hermes-net
 
@@ -85,6 +96,8 @@ services:
       - ./apps/mobile-pwa/public:/srv/pwa:ro
       - caddy-data:/data
       - caddy-config:/config
+    environment:
+      - API_SERVER_KEY=${API_SERVER_KEY:-hermes-local-key}
     networks:
       - hermes-net
 
@@ -164,6 +177,7 @@ services:
 # Volumes
 # ================================================================
 volumes:
+  hermes-home:
   hermes-workspace:
   code-server-data:
   caddy-data:

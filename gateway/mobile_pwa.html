@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b0d10" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <title>Hermes</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b0d10;
+      --card: #14171c;
+      --stroke: #2a2e36;
+      --text: #e4e4e7;
+      --muted: #a1a1aa;
+      --accent: #6366f1;
+      --danger: #ef4444;
+      --ok: #22c55e;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+      font: 16px/1.45 system-ui, -apple-system, sans-serif; }
+    body { display: flex; flex-direction: column; max-width: 40rem; margin: 0 auto;
+      padding: env(safe-area-inset-top) 1rem env(safe-area-inset-bottom); }
+    h1 { font-size: 1.1rem; margin: 0.75rem 0; }
+    .muted { color: var(--muted); font-size: 0.85rem; }
+    .status { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;
+      padding: 0.5rem 0; border-bottom: 1px solid var(--stroke); }
+    .dot { width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--ok); }
+    .dot.off { background: var(--danger); }
+    .log { flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 0.6rem;
+      padding: 0.75rem 0; }
+    .bubble { padding: 0.7rem 0.85rem; border-radius: 0.75rem; max-width: 92%;
+      white-space: pre-wrap; word-break: break-word; }
+    .me { align-self: flex-end; background: var(--accent); color: #fff; }
+    .them { align-self: flex-start; background: var(--card); border: 1px solid var(--stroke); }
+    .pending { background: var(--card); border: 1px solid var(--stroke); border-radius: 0.75rem;
+      padding: 0.85rem; }
+    .pending h2 { font-size: 0.8rem; margin: 0 0 0.35rem; text-transform: uppercase;
+      letter-spacing: 0.04em; color: var(--muted); }
+    .row { display: flex; gap: 0.5rem; margin-top: 0.7rem; }
+    button, input, textarea {
+      font: inherit; border-radius: 0.6rem; border: 1px solid var(--stroke); background: var(--card);
+      color: var(--text);
+    }
+    button { padding: 0.7rem 0.9rem; min-height: 2.75rem; cursor: pointer; }
+    button.primary { background: var(--accent); border-color: transparent; color: #fff; font-weight: 600; }
+    button.danger { background: transparent; color: var(--danger); }
+    button.ghost { background: transparent; color: var(--muted); }
+    input, textarea { width: 100%; padding: 0.75rem; }
+    textarea { min-height: 4.5rem; resize: vertical; }
+    .composer { display: flex; flex-direction: column; gap: 0.5rem; padding: 0.75rem 0 1rem; }
+    .err { color: var(--danger); font-size: 0.85rem; }
+    .pin { display: flex; flex-direction: column; gap: 0.75rem; margin-top: 2rem; }
+    code { font-size: 0.8rem; }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <script>
+    const TOKEN_KEY = "hermes-mobile-token";
+    const app = document.getElementById("app");
+
+    const state = {
+      token: sessionStorage.getItem(TOKEN_KEY) || "",
+      pin: "",
+      status: null,
+      messages: [],
+      pending: [],
+      text: "",
+      error: "",
+      busy: false
+    };
+
+    function authHeaders() {
+      return { "Content-Type": "application/json", Authorization: "Bearer " + state.token };
+    }
+
+    async function api(path, opts) {
+      const res = await fetch(path, opts);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || res.statusText || "Request failed");
+      return data;
+    }
+
+    async function login() {
+      state.error = "";
+      try {
+        const data = await api("/api/mobile/auth", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ pin: state.pin })
+        });
+        state.token = data.token;
+        sessionStorage.setItem(TOKEN_KEY, state.token);
+        state.pin = "";
+        await refresh();
+      } catch (err) {
+        state.error = err.message || "Invalid PIN";
+      }
+      render();
+    }
+
+    async function refresh() {
+      if (!state.token) return;
+      try {
+        state.status = await api("/api/mobile/status", { headers: authHeaders() });
+        const pending = await api("/api/mobile/pending", { headers: authHeaders() });
+        state.pending = pending.approvals || [];
+        state.error = "";
+      } catch (err) {
+        if (String(err.message).toLowerCase().includes("unauthorized")) {
+          state.token = "";
+          sessionStorage.removeItem(TOKEN_KEY);
+        }
+        state.error = err.message || "Disconnected";
+      }
+      render();
+    }
+
+    async function send(kind) {
+      const text = state.text.trim();
+      if (!text || state.busy) return;
+      state.busy = true;
+      state.error = "";
+      state.messages.push({ role: "me", text });
+      state.text = "";
+      render();
+      try {
+        const path = kind === "steer" ? "/api/mobile/steer" : "/api/mobile/chat";
+        const body = kind === "steer" ? { text } : { message: text };
+        const data = await api(path, { method: "POST", headers: authHeaders(), body: JSON.stringify(body) });
+        state.messages.push({ role: "them", text: data.response || "Sent." });
+      } catch (err) {
+        state.error = err.message || "Send failed";
+      }
+      state.busy = false;
+      await refresh();
+    }
+
+    async function resolve(choice, requestId) {
+      try {
+        await api("/api/mobile/approve", {
+          method: "POST",
+          headers: authHeaders(),
+          body: JSON.stringify({ choice, request_id: requestId })
+        });
+        await refresh();
+      } catch (err) {
+        state.error = err.message || "Could not resolve";
+        render();
+      }
+    }
+
+    function logout() {
+      state.token = "";
+      sessionStorage.removeItem(TOKEN_KEY);
+      render();
+    }
+
+    function el(tag, attrs, kids) {
+      const node = document.createElement(tag);
+      Object.entries(attrs || {}).forEach(([k, v]) => {
+        if (k === "on") Object.entries(v).forEach(([ev, fn]) => node.addEventListener(ev, fn));
+        else if (k === "class") node.className = v;
+        else if (k === "value") node.value = v;
+        else if (v != null) node.setAttribute(k, v);
+      });
+      (kids || []).forEach(child => node.append(child));
+      return node;
+    }
+
+    function render() {
+      app.replaceChildren();
+      if (!state.token) {
+        app.append(
+          el("div", { class: "pin" }, [
+            el("h1", {}, ["Hermes on your phone"]),
+            el("p", { class: "muted" }, ["Enter the PIN from Desktop → Settings → Mobile access."]),
+            el("input", {
+              type: "password",
+              inputmode: "numeric",
+              autocomplete: "one-time-code",
+              placeholder: "PIN",
+              value: state.pin,
+              on: { input: e => { state.pin = e.target.value; } }
+            }),
+            el("button", { class: "primary", on: { click: () => login() } }, ["Unlock"]),
+            state.error ? el("p", { class: "err" }, [state.error]) : ""
+          ].filter(Boolean))
+        );
+        return;
+      }
+
+      const connected = Boolean(state.status && state.status.connected);
+      app.append(
+        el("div", { class: "status" }, [
+          el("span", { class: connected ? "dot" : "dot off" }),
+          el("strong", {}, [state.status?.model || "Hermes"]),
+          el("span", { class: "muted" }, [state.status?.session_id ? "joined session" : "ready"]),
+          el("button", { class: "ghost", on: { click: logout } }, ["Lock"])
+        ]),
+        el("div", { class: "log", id: "log" }, [
+          ...state.pending.map(item => el("div", { class: "pending" }, [
+            el("h2", {}, ["Needs approval"]),
+            el("div", {}, [item.tool || item.name || "tool"]),
+            item.preview ? el("code", {}, [String(item.preview).slice(0, 400)]) : "",
+            el("div", { class: "row" }, [
+              el("button", { class: "primary", on: { click: () => resolve("approve", item.request_id || item.id) } }, ["Approve"]),
+              el("button", { class: "danger", on: { click: () => resolve("deny", item.request_id || item.id) } }, ["Deny"])
+            ])
+          ])),
+          ...state.messages.map(msg => el("div", { class: "bubble " + msg.role }, [msg.text]))
+        ].filter(Boolean)),
+        el("div", { class: "composer" }, [
+          state.error ? el("p", { class: "err" }, [state.error]) : "",
+          el("textarea", {
+            placeholder: "Message Hermes…",
+            value: state.text,
+            on: { input: e => { state.text = e.target.value; } }
+          }),
+          el("div", { class: "row" }, [
+            el("button", { class: "primary", on: { click: () => send("chat") } }, [state.busy ? "Sending…" : "Send"]),
+            el("button", { on: { click: () => send("steer") } }, ["Steer"])
+          ])
+        ].filter(Boolean))
+      );
+      const log = document.getElementById("log");
+      if (log) log.scrollTop = log.scrollHeight;
+    }
+
+    setInterval(() => { if (state.token) refresh(); }, 2500);
+    if (state.token) refresh();
+    else render();
+  </script>
+</body>
+</html>

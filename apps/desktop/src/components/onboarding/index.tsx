@@ -29,6 +29,7 @@ import {
 import type { ModelOptionProvider, OAuthProvider } from '@/types/hermes'
 
 import { DocsLink, FlowPanel, Status } from './flow'
+import { FirstRunWizard } from './first-run'
 import {
   FeaturedProviderRow,
   FireworksProviderRow,
@@ -206,6 +207,7 @@ export function DesktopOnboardingOverlay({
   // behind), THEN finalize so the unmount lands after the fade — mirrors the
   // connecting overlay's exit choreography instead of cutting instantly.
   const [leaving, setLeaving] = useState(false)
+  const [firstRunNeedKey, setFirstRunNeedKey] = useState(false)
 
   const finalizeOnboarding = () => {
     if (leaving) {
@@ -342,7 +344,28 @@ export function DesktopOnboardingOverlay({
           {reason ? <ReasonNotice reason={reason} /> : null}
           {ready ? (
             showPicker ? (
-              <Picker ctx={ctx} />
+              onboarding.manual || firstRunNeedKey ? (
+                <div className="grid gap-3">
+                  {firstRunNeedKey && !onboarding.manual ? (
+                    <Button
+                      className="self-start"
+                      onClick={() => setFirstRunNeedKey(false)}
+                      size="xs"
+                      type="button"
+                      variant="text"
+                    >
+                      {t.common.back}
+                    </Button>
+                  ) : null}
+                  <Picker ctx={ctx} />
+                </div>
+              ) : (
+                <FirstRunWizard
+                  ctx={ctx}
+                  onNeedKey={() => setFirstRunNeedKey(true)}
+                  profile={profile}
+                />
+              )
             ) : (
               <FlowPanel ctx={ctx} flow={flow} leaving={leaving} onBegin={finalizeOnboarding} />
             )

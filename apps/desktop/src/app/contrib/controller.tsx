@@ -43,7 +43,7 @@ import { discoverRuntimePlugins } from '@/contrib/runtime-loader'
 import { translateNow } from '@/i18n'
 import { NEW_SESSION_TITLE, sessionTitle as storedSessionTitle } from '@/lib/chat-runtime'
 import { Download, FileText, LayoutDashboard, PanelBottom, PanelTop, Terminal, Upload, Zap } from '@/lib/icons'
-import { Activity, BarChart3, Clipboard, CreditCard, Cpu, Eye, GitBranch, Users } from '@/lib/icons'
+import { Activity, BarChart3, Clipboard, CreditCard, Cpu, Eye, GitBranch, Network, NotebookTabs, Package, Users } from '@/lib/icons'
 import { type KeybindContribution, KEYBINDS_AREA } from '@/lib/keybinds/actions'
 import { TRANSCRIPT_DIRECTIVE_AREA, type TranscriptDirectiveContribution } from '@/lib/transcript-directives'
 import { setYoloEnabled } from '@/lib/yolo-session'
@@ -92,7 +92,7 @@ import { $terminalTakeover, setTerminalTakeover } from '../right-sidebar/store'
 import { $workspaceIsPage } from '../routes'
 
 import { FilesPane, LogsPane, ReviewPaneContent } from './panes'
-import { CrewPanel, CostPanel, DaemonPanel, GitPanel, PlanPanel } from './aizen-panels'
+import { CrewPanel, CostPanel, DaemonPanel, GitPanel, GraphPanel, McpAppsPanel, PlanPanel, RecipesPanel } from './aizen-panels'
 import { LivePreviewPanel } from './live-preview'
 import { ContribWiring, WiredPane } from './wiring'
 
@@ -332,6 +332,48 @@ registry.registerMany([
       revealOnPreset: true
     },
     render: () => idle(<LivePreviewPanel />)
+  },
+  {
+    id: 'aizen-recipes',
+    area: 'panes',
+    title: 'recipes',
+    data: {
+      placement: 'right',
+      collapsible: true,
+      dock: { pane: 'workspace', pos: 'right' },
+      width: '280px',
+      minWidth: '200px',
+      maxWidth: '500px'
+    },
+    render: () => idle(<RecipesPanel />)
+  },
+  {
+    id: 'aizen-mcp',
+    area: 'panes',
+    title: 'mcp apps',
+    data: {
+      placement: 'right',
+      collapsible: true,
+      dock: { pane: 'workspace', pos: 'right' },
+      width: '280px',
+      minWidth: '200px',
+      maxWidth: '500px'
+    },
+    render: () => idle(<McpAppsPanel />)
+  },
+  {
+    id: 'aizen-graph',
+    area: 'panes',
+    title: 'graph',
+    data: {
+      placement: 'right',
+      collapsible: true,
+      dock: { pane: 'workspace', pos: 'right' },
+      width: '280px',
+      minWidth: '200px',
+      maxWidth: '500px'
+    },
+    render: () => idle(<GraphPanel />)
   }
 ])
 
@@ -848,6 +890,30 @@ registry.registerMany([
     keywords: ['preview', 'live', 'iframe', 'browser', 'render', 'aizen'],
     get: () => isPaneVisible('aizen-preview'),
     set: () => togglePaneVisible('aizen-preview')
+  }),
+  paletteToggle({
+    id: 'aizen.toggleRecipes',
+    label: 'Toggle recipes panel',
+    icon: NotebookTabs,
+    keywords: ['recipes', 'playbook', 'workflow', 'aizen'],
+    get: () => isPaneVisible('aizen-recipes'),
+    set: () => togglePaneVisible('aizen-recipes')
+  }),
+  paletteToggle({
+    id: 'aizen.toggleMcp',
+    label: 'Toggle MCP apps panel',
+    icon: Package,
+    keywords: ['mcp', 'apps', 'tools', 'aizen'],
+    get: () => isPaneVisible('aizen-mcp'),
+    set: () => togglePaneVisible('aizen-mcp')
+  }),
+  paletteToggle({
+    id: 'aizen.toggleGraph',
+    label: 'Toggle graph panel',
+    icon: Network,
+    keywords: ['graph', 'graphify', 'index', 'codebase', 'aizen'],
+    get: () => isPaneVisible('aizen-graph'),
+    set: () => togglePaneVisible('aizen-graph')
   }),
 ])
 

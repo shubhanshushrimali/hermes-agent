@@ -23,6 +23,7 @@ import time
 from types import SimpleNamespace
 from typing import Any, Callable, Dict, List
 
+from agent.spend_budget import record_turn_cost
 from agent.stream_single_writer import claim_stream_writer, stream_writer_is_current
 
 logger = logging.getLogger(__name__)
@@ -209,6 +210,7 @@ def _record_codex_app_server_usage(agent, turn) -> dict[str, Any]:
     )
     if cost_result.amount_usd is not None:
         agent.session_estimated_cost_usd += float(cost_result.amount_usd)
+        record_turn_cost(agent, cost_result.amount_usd)
     agent.session_cost_status = cost_result.status
     agent.session_cost_source = cost_result.source
 

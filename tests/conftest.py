@@ -1655,6 +1655,19 @@ def _live_system_guard(request, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _reset_spend_budget():
+    """Process-wide daily spend singleton must not leak between tests."""
+    try:
+        from agent.spend_budget import reset_budget_for_tests
+    except Exception:
+        yield
+        return
+    reset_budget_for_tests()
+    yield
+    reset_budget_for_tests()
+
+
+@pytest.fixture(autouse=True)
 def _audio_playback_guard(request, monkeypatch):
     """Stub TTS synthesis + speaker playback for every test.
 

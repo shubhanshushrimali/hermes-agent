@@ -59,10 +59,14 @@ class TestIsCodingContext:
         assert cc.is_coding_context(platform="cli", cwd=tmp_path, config=cfg) is True
 
 
-    def test_default_mode_is_auto(self, tmp_path):
-        # Unknown/missing value normalizes to auto.
+    def test_default_mode_is_focus(self, tmp_path):
+        # Unknown/missing value normalizes to focus.
         _git_init(tmp_path)
+        assert cc._coding_mode({}) == "focus"
         assert cc.is_coding_context(platform="cli", cwd=tmp_path, config={}) is True
+        out = cc.coding_selection(platform="cli", cwd=tmp_path, config={})
+        assert out is not None
+        assert out[0] == cc.CODING_TOOLSET
 
 
 # ── toolset substitution ────────────────────────────────────────────────────

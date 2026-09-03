@@ -1,6 +1,7 @@
 import { useStore } from '@nanostores/react'
 import { memo, useEffect } from 'react'
 
+import { runInTerminal } from '@/app/right-sidebar/store'
 import { PrTag } from '@/app/chat/pr-tag'
 import { StatusRow } from '@/components/chat/status-row'
 import {
@@ -17,9 +18,13 @@ import { DiffCount } from '@/components/ui/diff-count'
 import type { HermesGitBranch } from '@/global'
 import { useI18n } from '@/i18n'
 import { displayPath } from '@/lib/display-path'
+import { normalizeOrLocalPreviewTarget } from '@/lib/local-preview'
 import { openWorktreeDialog, registerRepoStatusCwd, repoStatusForCwd, repoWorktreesForCwd } from '@/store/coding-status'
+import { $editorSnapshot } from '@/store/editor-snapshot'
 import { notifyError } from '@/store/notifications'
+import { openPreview } from '@/store/preview'
 import { $pullRequestsByBranch, branchPrKey, refreshPullRequests } from '@/store/pull-requests'
+import { $verifyHint, firstLspFile, refreshVerifyHint } from '@/store/verify-hint'
 
 // Tiny uppercase section header, matching the composer "+" menu's labels.
 const MENU_SECTION = 'text-[0.625rem] font-semibold uppercase tracking-wider text-(--ui-text-tertiary)'
@@ -73,6 +78,17 @@ export const CodingStatusRow = memo(function CodingStatusRow({
   // which is blank in exactly the same case) and cost a wrong-tree rail.
   const status = useStore(repoStatusForCwd(resolvedRepoPath))
   const worktrees = useStore(repoWorktreesForCwd(resolvedRepoPath))
+  const verify = useStore($verifyHint)
+
+  // While mounted, keep this worktree in the coding-status refresh set so the
+  // turn-settle / tool-complete / focus edges re-probe it too (tiles otherwise
+  // only refreshed when the MAIN cwd probe happened to cover them).
+  useEffect(() => registerRepoStatusCwd(resolvedRepoPath), [resolvedRepoPath])
+  useEffect(() => {
+    if (resolvedRepoPath) {
+      void refreshVerifyHint(resolvedRepoPath)
+    }
+  }, [resolvedRepoPath])
 
   // While mounted, keep this worktree in the coding-status refresh set so the
   // turn-settle / tool-complete / focus edges re-probe it too (tiles otherwise
@@ -324,6 +340,30 @@ export const CodingStatusRow = memo(function CodingStatusRow({
                 </span>
               ) : null}
             </button>
+          )}
+          {verify.commands[0] && (
+            <Button
+              className="ml-1 h-7 shrink-0 gap-1 px-2 text-[0.72rem]"
+              onClick={() => {
+                const command = verify.commands[0]
+                const file = firstLspFile(verify.lsp) || $editorSnapshot.get().activeFile
+                runInTerminal(command)
+                if (file) {
+                  void normalizeOrLocalPreviewTarget(file, resolvedRepoPath).then(preview => {
+                    if (preview) {
+                      openPreview(preview, 'tool-result')
+                    }
+                  })
+                }
+              }}
+              size="sm"
+              title={verify.hint || verify.commands[0]}
+              type="button"
+              variant="outline"
+            >
+              <Codicon name="beaker" size="0.8rem" />
+              {s.runTests}
+            </Button>
           )}
         </StatusRow>
       </ActionsContextMenu>

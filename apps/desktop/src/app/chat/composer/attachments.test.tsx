@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { I18nProvider } from '@/i18n/context'
 import type { ComposerAttachment } from '@/store/composer'
+import { $editorSnapshot } from '@/store/editor-snapshot'
 import { $previewTabs } from '@/store/preview'
 
 import { AttachmentList } from './attachments'
@@ -30,6 +31,13 @@ async function renderWithI18n(ui: React.ReactNode) {
 describe('AttachmentList', () => {
   afterEach(() => {
     cleanup()
+    $editorSnapshot.set({
+      activeFile: null,
+      language: null,
+      selection: null,
+      cursorLine: null,
+      unsaved: false
+    })
     Reflect.deleteProperty(window, 'hermesDesktop')
     vi.restoreAllMocks()
   })
@@ -47,6 +55,20 @@ describe('AttachmentList', () => {
     const attachmentList = container.querySelector('[data-slot="composer-attachments"]')
 
     expect(attachmentList).toBeDefined()
+  })
+
+  it('shows an editor-context chip when a file is open', async () => {
+    $editorSnapshot.set({
+      activeFile: '/repo/src/app.ts',
+      language: 'typescript',
+      selection: null,
+      cursorLine: 12,
+      unsaved: false
+    })
+
+    await renderWithI18n(<AttachmentList attachments={[]} />)
+
+    expect(screen.getByText('Editor · app.ts')).toBeTruthy()
   })
 
   it('does not crash when attachments array contains undefined entries', async () => {

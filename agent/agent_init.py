@@ -34,6 +34,11 @@ from agent.context_compressor import ContextCompressor
 from agent.iteration_budget import IterationBudget
 from agent.memory_manager import StreamingContextScrubber
 from agent.session_activity import ActivityProvenance
+from agent.spend_budget import (
+    get_budget as get_spend_budget,
+    normalize_positive_float,
+    normalize_positive_int,
+)
 from agent.model_metadata import (
     MINIMUM_CONTEXT_LENGTH,
     fetch_model_metadata,
@@ -1027,6 +1032,10 @@ def init_agent(
     agent._run_budget_started_at = None
     # One-shot latch for the 80% wrap-up notice (reset each turn).
     agent._run_budget_wrapup_injected = False
+    agent._spend_budget_wrapup_injected = False
+    agent.max_daily_cost_usd = None
+    agent.max_session_cost_usd = None
+    agent.max_session_tokens = None
 
     # Activity tracking — updated on each API call, tool execution, and
     # stream chunk.  Used by the gateway timeout handler to report what the
@@ -2008,6 +2017,21 @@ def init_agent(
             _agent_section.get("run_budget_seconds")
         )
 
+    agent.max_daily_cost_usd = normalize_positive_float(
+        _agent_section.get("max_daily_cost_usd", 10.0)
+    )
+    agent.max_session_cost_usd = normalize_positive_float(
+        _agent_section.get("max_session_cost_usd")
+    )
+    agent.max_session_tokens = normalize_positive_int(
+        _agent_section.get("max_session_tokens")
+    )
+    if agent.max_daily_cost_usd is not None:
+        try:
+            get_spend_budget().max_daily_usd = agent.max_daily_cost_usd
+        except Exception:
+            pass
+
     # Empty-response retry guard config (NS-503): additive
     # ``agent.empty_response_guard`` subsection. Resolution is tolerant —
     # a malformed section falls back to the schema defaults (guard on,
@@ -2040,6 +2064,10 @@ def init_agent(
     # the other.  Steers the model to batch independent tool calls into a
     # single turn; the runtime already executes such batches concurrently.
     agent._parallel_tool_call_guidance = bool(_agent_section.get("parallel_tool_call_guidance", True))
+
+    # Consequence / responsibility steer. Default True. Names blast radius
+    # before mutating tools and prefers the smallest reversible step.
+    agent._consequence_guidance = bool(_agent_section.get("consequence_guidance", True))
 
     # Local Python toolchain probe toggle.  Default True.  When False,
     # the probe is skipped entirely (no subprocess calls, no system-prompt

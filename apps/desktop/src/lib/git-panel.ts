@@ -1,156 +1,168 @@
 /**
- * Git Integration Panel — diff, commit, push from the UI.
+ * Git Integration Panel — status, commit, push from the UI.
  *
- * Every agent action is a git commit. Undo = git revert.
- * The panel shows: staged changes, commit history, branch status.
+ * Overlay git uses the same native desktop git surface as the coding rail
+ * (`desktopGit` → Electron git or dashboard `/api/git/*` with `path=`).
+ * There is no overlay-only `/api/git/status?workspace=` API.
  */
 
-import { useState, useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react'
 
-export interface GitStatus {
-  branch: string;
-  ahead: number;
-  behind: number;
-  staged: GitFile[];
-  unstaged: GitFile[];
-  untracked: GitFile[];
-  lastCommit: GitCommit | null;
-}
+import type { HermesRepoStatus, HermesRepoStatusFile } from '@/global'
+import { desktopGit } from '@/lib/desktop-git'
 
 export interface GitFile {
-  path: string;
-  status: 'added' | 'modified' | 'deleted' | 'renamed';
-  diff?: string;
+  path: string
+  status: 'added' | 'modified' | 'deleted' | 'renamed'
+  diff?: string
 }
 
 export interface GitCommit {
-  hash: string;
-  shortHash: string;
-  message: string;
-  author: string;
-  date: string;
-  isAgentCommit: boolean; // true if made by Hermes agent
+  hash: string
+  shortHash: string
+  message: string
+  author: string
+  date: string
+  isAgentCommit: boolean
+}
+
+export interface GitStatus {
+  branch: string
+  ahead: number
+  behind: number
+  staged: GitFile[]
+  unstaged: GitFile[]
+  untracked: GitFile[]
+  lastCommit: GitCommit | null
 }
 
 export interface UseGitPanelReturn {
-  status: GitStatus | null;
-  commits: GitCommit[];
-  isLoading: boolean;
-  error: string | null;
-  refresh: () => Promise<void>;
-  stageFile: (path: string) => Promise<void>;
-  unstageFile: (path: string) => Promise<void>;
-  stageAll: () => Promise<void>;
-  commit: (message: string) => Promise<void>;
-  push: () => Promise<void>;
-  pull: () => Promise<void>;
-  revert: (hash: string) => Promise<void>;
-  getDiff: (path: string) => Promise<string>;
+  status: GitStatus | null
+  commits: GitCommit[]
+  isLoading: boolean
+  error: string | null
+  refresh: () => Promise<void>
+  stageFile: (path: string) => Promise<void>
+  unstageFile: (path: string) => Promise<void>
+  stageAll: () => Promise<void>
+  commit: (message: string) => Promise<void>
+  push: () => Promise<void>
+  pull: () => Promise<void>
+  revert: (hash: string) => Promise<void>
+  getDiff: (path: string) => Promise<string>
 }
 
-const API_BASE = '/api/git';
+function fileKind(file: HermesRepoStatusFile): GitFile['status'] {
+  if (file.untracked) return 'added'
+  return 'modified'
+}
 
-async function gitFetch(path: string, options?: RequestInit) {
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...options,
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
-  });
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
+export function mapRepoStatus(repo: HermesRepoStatus): GitStatus {
+  return {
+    branch: repo.branch || (repo.detached ? '(detached)' : 'HEAD'),
+    ahead: repo.ahead,
+    behind: repo.behind,
+    staged: repo.files.filter(f => f.staged).map(f => ({ path: f.path, status: fileKind(f) })),
+    unstaged: repo.files
+      .filter(f => f.unstaged && !f.staged && !f.untracked)
+      .map(f => ({ path: f.path, status: fileKind(f) })),
+    untracked: repo.files.filter(f => f.untracked).map(f => ({ path: f.path, status: 'added' })),
+    lastCommit: null,
+  }
 }
 
 export function useGitPanel(workspacePath: string): UseGitPanelReturn {
-  const [status, setStatus] = useState<GitStatus | null>(null);
-  const [commits, setCommits] = useState<GitCommit[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [status, setStatus] = useState<GitStatus | null>(null)
+  const [commits, setCommits] = useState<GitCommit[]>([])
+  const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
+    const git = desktopGit()
+    setIsLoading(true)
+    setError(null)
     try {
-      const [statusData, commitData] = await Promise.all([
-        gitFetch(`/status?workspace=${encodeURIComponent(workspacePath)}`),
-        gitFetch(`/log?workspace=${encodeURIComponent(workspacePath)}&limit=20`),
-      ]);
-      setStatus(statusData);
-      setCommits(commitData.commits || []);
-    } catch (err: any) {
-      setError(err.message);
+      if (!workspacePath.trim() || !git?.repoStatus) {
+        setStatus(null)
+        setCommits([])
+        return
+      }
+      const repo = await git.repoStatus(workspacePath)
+      setStatus(repo ? mapRepoStatus(repo) : null)
+      setCommits([])
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err))
     } finally {
-      setIsLoading(false);
+      setIsLoading(false)
     }
-  }, [workspacePath]);
+  }, [workspacePath])
 
   const stageFile = useCallback(async (path: string) => {
-    await gitFetch('/stage', {
-      method: 'POST',
-      body: JSON.stringify({ workspace: workspacePath, files: [path] }),
-    });
-    await refresh();
-  }, [workspacePath, refresh]);
+    const git = desktopGit()
+    if (!git?.review) throw new Error('Git is not available')
+    await git.review.stage(workspacePath, path)
+    await refresh()
+  }, [workspacePath, refresh])
 
   const unstageFile = useCallback(async (path: string) => {
-    await gitFetch('/unstage', {
-      method: 'POST',
-      body: JSON.stringify({ workspace: workspacePath, files: [path] }),
-    });
-    await refresh();
-  }, [workspacePath, refresh]);
+    const git = desktopGit()
+    if (!git?.review) throw new Error('Git is not available')
+    await git.review.unstage(workspacePath, path)
+    await refresh()
+  }, [workspacePath, refresh])
 
   const stageAll = useCallback(async () => {
-    await gitFetch('/stage', {
-      method: 'POST',
-      body: JSON.stringify({ workspace: workspacePath, files: ['.'] }),
-    });
-    await refresh();
-  }, [workspacePath, refresh]);
+    const git = desktopGit()
+    if (!git?.review) throw new Error('Git is not available')
+    await git.review.stage(workspacePath, null)
+    await refresh()
+  }, [workspacePath, refresh])
 
   const commit = useCallback(async (message: string) => {
-    await gitFetch('/commit', {
-      method: 'POST',
-      body: JSON.stringify({ workspace: workspacePath, message }),
-    });
-    await refresh();
-  }, [workspacePath, refresh]);
+    const git = desktopGit()
+    if (!git?.review) throw new Error('Git is not available')
+    await git.review.commit(workspacePath, message, false)
+    await refresh()
+  }, [workspacePath, refresh])
 
   const push = useCallback(async () => {
-    await gitFetch('/push', {
-      method: 'POST',
-      body: JSON.stringify({ workspace: workspacePath }),
-    });
-    await refresh();
-  }, [workspacePath, refresh]);
+    const git = desktopGit()
+    if (!git?.review) throw new Error('Git is not available')
+    await git.review.push(workspacePath)
+    await refresh()
+  }, [workspacePath, refresh])
 
   const pull = useCallback(async () => {
-    await gitFetch('/pull', {
-      method: 'POST',
-      body: JSON.stringify({ workspace: workspacePath }),
-    });
-    await refresh();
-  }, [workspacePath, refresh]);
+    throw new Error('Pull is not available on the dashboard git API')
+  }, [])
 
-  const revert = useCallback(async (hash: string) => {
-    await gitFetch('/revert', {
-      method: 'POST',
-      body: JSON.stringify({ workspace: workspacePath, commit_hash: hash }),
-    });
-    await refresh();
-  }, [workspacePath, refresh]);
+  const revert = useCallback(async (_hash: string) => {
+    throw new Error('Commit revert is not available on the dashboard git API')
+  }, [])
 
   const getDiff = useCallback(async (path: string): Promise<string> => {
-    const data = await gitFetch(
-      `/diff?workspace=${encodeURIComponent(workspacePath)}&file=${encodeURIComponent(path)}`
-    );
-    return data.diff || '';
-  }, [workspacePath]);
+    const git = desktopGit()
+    if (!git?.fileDiff) return ''
+    return git.fileDiff(workspacePath, path)
+  }, [workspacePath])
 
-  // Auto-refresh on mount.
-  useEffect(() => { refresh(); }, [refresh]);
+  useEffect(() => {
+    void refresh()
+  }, [refresh])
 
   return {
-    status, commits, isLoading, error,
-    refresh, stageFile, unstageFile, stageAll,
-    commit, push, pull, revert, getDiff,
-  };
+    status,
+    commits,
+    isLoading,
+    error,
+    refresh,
+    stageFile,
+    unstageFile,
+    stageAll,
+    commit,
+    push,
+    pull,
+    revert,
+    getDiff,
+  }
 }

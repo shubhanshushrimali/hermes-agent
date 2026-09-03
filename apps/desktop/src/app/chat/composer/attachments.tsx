@@ -8,10 +8,11 @@ import { Tip } from '@/components/ui/tooltip'
 import { useImageDownload } from '@/hooks/use-image-download'
 import { useI18n } from '@/i18n'
 import { readDesktopFileDataUrlLocalFirst } from '@/lib/desktop-fs'
-import { AlertCircle, FileText, FolderOpen, ImageIcon, Link, Loader2, MessageCode, Terminal } from '@/lib/icons'
+import { FileText, FolderOpen, ImageIcon, Link, Loader2, MessageCode, Pencil, Terminal } from '@/lib/icons'
 import { normalizeOrLocalPreviewTarget } from '@/lib/local-preview'
 import { cn } from '@/lib/utils'
 import type { ComposerAttachment } from '@/store/composer'
+import { $editorSnapshot } from '@/store/editor-snapshot'
 import { notifyError } from '@/store/notifications'
 import { openPreview } from '@/store/preview'
 
@@ -22,9 +23,18 @@ export function AttachmentList({
   attachments: ComposerAttachment[]
   onRemove?: (id: string) => void
 }) {
+  const editor = useStore($editorSnapshot)
+  const showEditor = Boolean(editor.activeFile)
+  const present = attachments.filter(Boolean)
+
+  if (!present.length && !showEditor) {
+    return null
+  }
+
   return (
     <div className="flex max-w-full flex-wrap gap-1.5 px-1 pt-1" data-slot="composer-attachments">
-      {attachments.filter(Boolean).map(attachment => (
+      {showEditor ? <EditorContextChip file={editor.activeFile} /> : null}
+      {present.map(attachment => (
         <AttachmentPill
           attachment={attachment}
           key={attachment.occurrenceId ? `occ:${attachment.occurrenceId}` : attachment.id}
@@ -32,6 +42,28 @@ export function AttachmentList({
         />
       ))}
     </div>
+  )
+}
+
+function EditorContextChip({ file }: { file: string | null }) {
+  const { t } = useI18n()
+  const name = file?.split(/[/\\]/).pop() || null
+  const label = name ? t.composer.editorContextWithFile(name) : t.composer.editorContext
+
+  return (
+    <Tip label={file || label}>
+      <div className="flex max-w-56 items-center gap-2 rounded-2xl border border-border/60 bg-background/50 px-2 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.18)]">
+        <span className="grid size-8 shrink-0 place-items-center overflow-hidden rounded-lg border border-border/55 bg-muted/35 text-muted-foreground">
+          <Pencil className="size-3.5" />
+        </span>
+        <span className="min-w-0">
+          <span className="block truncate text-[0.72rem] font-medium leading-4 text-foreground/90">{label}</span>
+          <span className="block truncate text-[0.62rem] leading-3.5 text-muted-foreground/65">
+            {t.composer.send}
+          </span>
+        </span>
+      </div>
+    </Tip>
   )
 }
 

@@ -26,10 +26,16 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+import shlex
+import sqlite3
+import subprocess
 import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Sequence
+
+from agent.spend_budget import BudgetGuard, get_budget
 
 logger = logging.getLogger("hermes.graph_engine")
 
@@ -330,14 +336,17 @@ def node_research(state: dict) -> dict:
     try:
         from gateway.codebase_graph import get_graph_manager
         manager = get_graph_manager()
-        # Try to find a workspace path from session or default.
-        workspace = state.get("workspace_path", os.getcwd())
-        graph = manager.get_graph(workspace)
-        if graph:
-            code_context = manager.query(workspace, prompt)
-            if code_context:
-                context.append(f"Codebase graph context:\n{code_context}")
-                slog.info("graph_context_added", nodes=graph.node_count)
+        workspace = state.get("workspace_path") or os.getcwd()
+        active_file = state.get("active_file") or ""
+        context_str, _warnings, _status = manager.graph_context_for_turn(
+            workspace,
+            prompt,
+            active_file=active_file,
+            max_tokens=2000,
+        )
+        if context_str:
+            context.append(f"Codebase graph context:\n{context_str}")
+            slog.info("graph_context_added", nodes=_status.get("nodes", 0))
     except Exception as e:
         logger.debug("Codebase graph query failed: %s", e)
 
@@ -354,21 +363,45 @@ def node_research(state: dict) -> dict:
     return {**state, "research_context": context}
 
 
+def _run_execute_turn(prompt: str, session_key: str, workspace: str, model: str) -> str:
+    """Run one agent turn with tools. Never recurse into process_prompt."""
+    try:
+        from gateway.session_prompt import run_ephemeral_turn
+
+        return run_ephemeral_turn(
+            prompt,
+            session_id=session_key or "graph-engine-ephemeral",
+            cwd=workspace or None,
+            model=model or None,
+        )
+    except Exception as exc:
+        logger.warning("graph execute turn failed: %s", exc)
+
+    if LITELLM_AVAILABLE and model:
+        try:
+            response = litellm.completion(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=1200,
+            )
+            return (response.choices[0].message.content or "").strip()
+        except Exception as exc:
+            logger.debug("litellm execute fallback failed: %s", exc)
+    return ""
+
+
 @observe(name="node:execute")
 def node_execute(state: dict) -> dict:
-    """Execute the agent turn using the existing GatewayRunner.
+    """Execute the agent turn using the existing session runner.
 
-    This node bridges the graph engine to the existing Hermes agent
-    loop. The graph provides structured context; the agent does the work.
+    Live desktop chat must not call process_prompt() — that would recurse.
+    Daemon / eval use this node to actually run the agent.
     """
-    # The actual execution happens in GatewayRunner._run_agent_inner.
-    # This node prepares the enhanced prompt with plan + research context.
     prompt = state.get("user_prompt", "")
     plan = state.get("plan", [])
     research = state.get("research_context", [])
     current_step = state.get("current_step", 0)
 
-    # Build enhanced prompt with context.
     enhanced_parts = []
 
     if plan and len(plan) > 1:
@@ -377,7 +410,7 @@ def node_execute(state: dict) -> dict:
         enhanced_parts.append(f"Full plan: {json.dumps(plan)}")
 
     if research:
-        enhanced_parts.append(f"Research context: {' '.join(research[:2])}")
+        enhanced_parts.append(f"Research context: {' '.join(str(item) for item in research[:2])}")
 
     enhanced_prompt = prompt
     if enhanced_parts:
@@ -385,46 +418,82 @@ def node_execute(state: dict) -> dict:
 
     slog.info("execute_start", step=current_step, has_research=bool(research))
 
+    agent_response = state.get("agent_response") or ""
+    if not agent_response and not state.get("skip_execute"):
+        agent_response = _run_execute_turn(
+            enhanced_prompt,
+            str(state.get("session_key") or ""),
+            str(state.get("workspace_path") or os.getcwd()),
+            str(state.get("model") or ""),
+        )
+
     return {
         **state,
-        "agent_response": "",  # Will be filled by GatewayRunner
+        "agent_response": agent_response,
+        "enhanced_prompt": enhanced_prompt,
         "messages": state.get("messages", []) + [
             {"role": "user", "content": enhanced_prompt}
         ],
     }
 
 
+def _verify_commands_for(state: dict) -> List[str]:
+    commands = [
+        cmd for cmd in list(state.get("verify_commands") or [])
+        if isinstance(cmd, str) and cmd.strip()
+    ]
+    if commands:
+        return commands
+    workspace = str(state.get("workspace_path") or os.getcwd())
+    try:
+        from agent.coding_context import project_facts_for
+
+        facts = project_facts_for(workspace)
+        return [cmd for cmd in list((facts or {}).get("verifyCommands") or []) if cmd]
+    except Exception:
+        return []
+
+
 @observe(name="node:validate")
 def node_validate(state: dict) -> dict:
-    """Validate the agent's work — run tests, check lint, verify output.
-
-    This is what closes the quality gap between weak and strong models.
-    The graph catches mistakes and retries automatically.
-    """
+    """Validate with the project's verify commands — never a blind repo pytest."""
     response = state.get("agent_response", "")
     code_changes = state.get("code_changes", [])
+    intent = state.get("intent", "")
 
-    # If no code was changed, skip validation.
-    if not code_changes:
-        return {**state, "test_passed": True}
+    if not response:
+        return {**state, "test_passed": True, "test_results": "No agent response; skipped validate"}
 
+    if not code_changes and intent not in ("test",):
+        return {**state, "test_passed": True, "test_results": "No code_changes; skipped validate"}
+
+    commands = _verify_commands_for(state)
+    if not commands:
+        return {
+            **state,
+            "test_passed": True,
+            "test_results": "No project verify commands; skipped",
+        }
+
+    workspace = str(state.get("workspace_path") or os.getcwd())
+    command = commands[0]
     test_passed = True
     test_results = ""
-    lint_errors = []
-
-    # Try running tests if any test files were modified.
     try:
-        import subprocess
-        # Check for Python tests.
+        argv = shlex.split(command, posix=os.name != "nt")
         result = subprocess.run(
-            ["python", "-m", "pytest", "--tb=short", "-q", "--no-header"],
-            capture_output=True, text=True, timeout=30, cwd="."
+            argv or command,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            cwd=workspace,
+            shell=False,
         )
-        test_results = result.stdout + result.stderr
+        test_results = (result.stdout or "") + (result.stderr or "")
         test_passed = result.returncode == 0
-    except Exception:
-        # No tests to run — that's OK.
-        pass
+    except Exception as exc:
+        test_passed = False
+        test_results = str(exc)
 
     slog.info("validation_complete", passed=test_passed, retry=state.get("retry_count", 0))
 
@@ -432,7 +501,7 @@ def node_validate(state: dict) -> dict:
         **state,
         "test_passed": test_passed,
         "test_results": test_results,
-        "lint_errors": lint_errors,
+        "lint_errors": [],
     }
 
 
@@ -578,13 +647,44 @@ def create_agent_graph(
     # Report is the end.
     graph.add_edge("report", END)
 
-    # Compile with optional checkpointer for persistence.
+    # Compile with a persistent checkpointer when SQLite is available.
     if checkpointer is None:
-        checkpointer = MemorySaver()
+        checkpointer = _build_checkpointer()
 
     compiled = graph.compile(checkpointer=checkpointer)
     slog.info("graph_compiled", nodes=7, edges=8)
     return compiled
+
+
+def _build_checkpointer() -> Any:
+    """SQLite checkpointer so retries survive process restart; else MemorySaver."""
+    if not LANGGRAPH_AVAILABLE:
+        return None
+    try:
+        from hermes_cli.config import get_hermes_home
+
+        db_path = os.path.join(str(get_hermes_home()), "graph_checkpoints.db")
+    except Exception:
+        db_path = os.path.join(os.path.expanduser("~"), ".hermes", "graph_checkpoints.db")
+    try:
+        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+    except Exception:
+        pass
+
+    try:
+        from langgraph.checkpoint.sqlite import SqliteSaver
+
+        conn = sqlite3.connect(db_path, check_same_thread=False)
+        return SqliteSaver(conn)
+    except Exception:
+        pass
+    try:
+        from langgraph.checkpoint.sqlite import SqliteSaver
+
+        return SqliteSaver.from_conn_string(db_path)
+    except Exception:
+        pass
+    return MemorySaver()
 
 
 class FallbackGraph:
@@ -609,59 +709,6 @@ class FallbackGraph:
 
 
 # ============================================================================
-# Budget Guardrails
-# ============================================================================
-
-class BudgetGuard:
-    """Track and limit API spend per day.
-
-    Prevents runaway costs when agents run 24/7 on a laptop.
-    """
-
-    def __init__(self, max_daily_usd: float = 10.0, db_path: str = None):
-        self.max_daily_usd = max_daily_usd
-        self._daily_spend: float = 0.0
-        self._date: str = ""
-        self._db_path = db_path
-
-    def _today(self) -> str:
-        import datetime
-        return datetime.date.today().isoformat()
-
-    def check_budget(self) -> bool:
-        """Return True if we're under budget."""
-        today = self._today()
-        if today != self._date:
-            # New day — reset counter.
-            self._daily_spend = 0.0
-            self._date = today
-        return self._daily_spend < self.max_daily_usd
-
-    def record_cost(self, cost_usd: float) -> None:
-        """Record a cost and check if we've exceeded the budget."""
-        today = self._today()
-        if today != self._date:
-            self._daily_spend = 0.0
-            self._date = today
-        self._daily_spend += cost_usd
-
-        if self._daily_spend >= self.max_daily_usd:
-            slog.warning(
-                "budget_exceeded",
-                daily_spend=f"${self._daily_spend:.4f}",
-                max=f"${self.max_daily_usd:.2f}",
-            )
-
-    @property
-    def remaining_budget(self) -> float:
-        return max(0, self.max_daily_usd - self._daily_spend)
-
-    @property
-    def daily_spend(self) -> float:
-        return self._daily_spend
-
-
-# ============================================================================
 # LiteLLM Model Router
 # ============================================================================
 
@@ -672,37 +719,40 @@ class ModelRouter:
     models only when needed. ~70% cost reduction.
     """
 
-    # Default routing table — override via config.
+    # Default routing table — used only when the session has no model.
+    # Never hardcode a cloud model; the desktop picker owns that choice.
     DEFAULT_ROUTES: Dict[str, str] = {
-        # Intent → Model
-        "simple": "ollama/llama3.2:3b",          # $0 — local
-        "explain": "ollama/llama3.2:3b",          # $0 — local
-        "classify": "ollama/llama3.2:3b",         # $0 — local
-        "code": "anthropic/claude-sonnet-4-20250514",        # Cloud
-        "debug": "anthropic/claude-sonnet-4-20250514",       # Cloud
-        "refactor": "anthropic/claude-sonnet-4-20250514",    # Cloud
-        "test": "ollama/codestral:22b",           # $0 — local (if GPU)
-        "research": "ollama/llama3.2:3b",         # $0 — local
-        "creative": "anthropic/claude-sonnet-4-20250514",    # Cloud
+        "simple": "",
+        "explain": "",
+        "classify": "",
+        "code": "",
+        "debug": "",
+        "refactor": "",
+        "test": "",
+        "research": "",
+        "creative": "",
     }
 
     def __init__(self, routes: Optional[Dict[str, str]] = None,
                  budget: Optional[BudgetGuard] = None):
         self.routes = routes or dict(self.DEFAULT_ROUTES)
-        self.budget = budget or BudgetGuard()
+        self.budget = budget or get_budget()
 
     def get_model(self, intent: str, fallback: str = "") -> str:
-        """Get the optimal model for an intent.
+        """Prefer the session's selected model.
 
-        If budget is exhausted, falls back to free local models.
+        When the spend cap is exhausted, keep the session model if it is
+        already local; otherwise fall back to a free local id.
         """
         if not self.budget.check_budget():
             slog.warning("budget_exhausted_using_local", intent=intent)
-            return "ollama/llama3.2:3b"  # Always free
+            if fallback and "ollama/" in fallback:
+                return fallback
+            return fallback if fallback.startswith("ollama/") else "ollama/llama3.2:3b"
 
-        model = self.routes.get(intent, fallback or "ollama/llama3.2:3b")
-        slog.debug("model_routed", intent=intent, model=model)
-        return model
+        if fallback:
+            return fallback
+        return self.routes.get(intent, "") or fallback
 
     @observe(name="litellm_completion")
     def completion(self, intent: str, messages: List[Dict], **kwargs) -> Any:
@@ -729,7 +779,6 @@ class ModelRouter:
 # Singleton instances.
 _graph = None
 _router = None
-_budget = None
 
 
 def get_graph() -> Any:
@@ -748,24 +797,17 @@ def get_router() -> ModelRouter:
     return _router
 
 
-def get_budget() -> BudgetGuard:
-    """Get or create the global budget guard."""
-    global _budget
-    if _budget is None:
-        _budget = BudgetGuard(max_daily_usd=10.0)
-    return _budget
-
-
 def process_prompt(user_prompt: str, session_key: str = "",
-                   model: str = "") -> dict:
+                   model: str = "", workspace_path: str = "",
+                   verify_commands: Optional[List[str]] = None) -> dict:
     """Process a user prompt through the graph engine.
 
     This is the main entry point. Returns the final AgentState dict.
+    Live desktop chat must not call this — it would nest a second agent turn.
     """
     graph = get_graph()
     router = get_router()
 
-    # Quick classify to pick the right model.
     intent = classify_intent_local(user_prompt)
     if not model:
         model = router.get_model(intent.value)
@@ -774,8 +816,14 @@ def process_prompt(user_prompt: str, session_key: str = "",
         "user_prompt": user_prompt,
         "session_key": session_key,
         "model": model,
+        "workspace_path": workspace_path or os.getcwd(),
+        "verify_commands": list(verify_commands or []),
         "start_time": time.time(),
     }
 
-    result = graph.invoke(state)
+    config = {"configurable": {"thread_id": session_key or "default"}}
+    try:
+        result = graph.invoke(state, config=config)
+    except TypeError:
+        result = graph.invoke(state)
     return result

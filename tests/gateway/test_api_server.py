@@ -314,6 +314,7 @@ def _create_app(adapter: APIServerAdapter) -> web.Application:
     app.router.add_get("/v1/toolsets", adapter._handle_toolsets)
     app.router.add_post("/api/sessions/{session_id}/chat", adapter._handle_session_chat)
     app.router.add_post("/api/sessions/{session_id}/chat/stream", adapter._handle_session_chat_stream)
+    app.router.add_post("/api/chat", adapter._handle_simple_chat)
     app.router.add_post("/v1/chat/completions", adapter._handle_chat_completions)
     app.router.add_post("/v1/responses", adapter._handle_responses)
     app.router.add_get("/v1/responses/{response_id}", adapter._handle_get_response)
@@ -876,6 +877,60 @@ class TestCapabilitiesEndpoint:
             assert data["endpoints"]["model_options"] == {"method": "GET", "path": "/api/model/options"}
             assert data["endpoints"]["skills"] == {"method": "GET", "path": "/v1/skills"}
             assert data["endpoints"]["toolsets"] == {"method": "GET", "path": "/v1/toolsets"}
+            assert data["endpoints"]["simple_chat"] == {"method": "POST", "path": "/api/chat"}
+
+
+# ---------------------------------------------------------------------------
+# POST /api/chat — PWA adapter over persisted session runtime
+# ---------------------------------------------------------------------------
+
+
+class TestSimpleChatEndpoint:
+    @pytest.mark.asyncio
+    async def test_simple_chat_runs_session_agent_not_global_gateway_agent(self, adapter):
+        """PWA posts {message, conversation_id}. That must hit _run_agent.
+
+        The old Aizen overlay looked up gateway_runner.agent (which does not
+        exist) and 503'd. Native /api/chat get-or-creates a SessionDB row
+        and runs the same turn as POST /api/sessions/{id}/chat.
+        """
+        app = _create_app(adapter)
+        async with TestClient(TestServer(app)) as cli:
+            with (
+                patch.object(
+                    adapter,
+                    "_get_or_create_simple_chat_session",
+                    new=AsyncMock(return_value=({"id": "conv-1", "source": "pwa"}, None)),
+                ),
+                patch.object(adapter, "_conversation_history_for_session", new=AsyncMock(return_value=[])),
+                patch.object(adapter, "_run_agent", new_callable=AsyncMock) as mock_run,
+            ):
+                mock_run.return_value = (
+                    {"final_response": "hello there", "session_id": "conv-1"},
+                    {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+                )
+                resp = await cli.post(
+                    "/api/chat",
+                    json={"message": "hi", "conversation_id": "conv-1"},
+                    headers={"X-Hermes-Session-Id": "conv-1"},
+                )
+                assert resp.status == 200
+                data = await resp.json()
+
+        assert data["response"] == "hello there"
+        assert data["message"] == "hello there"
+        assert data["session_id"] == "conv-1"
+        assert resp.headers.get("X-Hermes-Session-Id") == "conv-1"
+        kwargs = mock_run.call_args.kwargs
+        assert kwargs["session_id"] == "conv-1"
+        assert kwargs["user_message"] == "hi"
+
+    @pytest.mark.asyncio
+    async def test_simple_chat_requires_message(self, adapter):
+        app = _create_app(adapter)
+        async with TestClient(TestServer(app)) as cli:
+            resp = await cli.post("/api/chat", json={"conversation_id": "conv-1"})
+            assert resp.status == 400
 
 
 # ---------------------------------------------------------------------------

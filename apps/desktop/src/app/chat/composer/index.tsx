@@ -24,6 +24,7 @@ import { $hudMode } from '@/store/hud'
 import { sessionBlockingPrompt } from '@/store/prompts'
 import { toggleReview } from '@/store/review'
 import { $gatewayState } from '@/store/session'
+import { $spendCap } from '@/store/spend-cap'
 import { $botChatSessionIds, $sessionStates, $sessionTiles, isBotChatSession } from '@/store/session-states'
 import { $threadScrolledUp } from '@/store/thread-scroll'
 import { $autoSpeakReplies } from '@/store/voice-prefs'
@@ -220,6 +221,7 @@ export function ChatBar({
 
   const { t } = useI18n()
   const gatewayState = useStore($gatewayState)
+  const spendCapped = useStore($spendCap).exhausted
   const reconnecting = gatewayState === 'closed' || gatewayState === 'error'
   const inputDisabled = disabled && !reconnecting
 
@@ -317,7 +319,7 @@ export function ChatBar({
     sessionId
   })
 
-  const statusStackVisible = queuedPrompts.length > 0 || statusPresent
+  const statusStackVisible = queuedPrompts.length > 0 || statusPresent || busy || spendCapped
 
   // Halt vs. reach-the-queue: every interrupt lands on onCancel, but only the
   // gestures that MEAN "stop working" (Stop button, Esc) go through this
@@ -1194,6 +1196,8 @@ export function ChatBar({
               grows upward over the thread and the dock's own measurement covers
               it. Collapses to nothing when every status is empty. */}
           <ComposerStatusStack
+            busy={busy}
+            onSteer={canSteer ? () => focusInput() : undefined}
             queue={
               activeQueueSessionKey && queuedPrompts.length > 0 ? (
                 <QueuePanel
@@ -1370,7 +1374,7 @@ export function ChatBar({
                       </div>
                     </div>
                   )}
-                  {attachments.length > 0 && <AttachmentList attachments={attachments} onRemove={onRemoveAttachment} />}
+                  <AttachmentList attachments={attachments} onRemove={onRemoveAttachment} />
                   <div
                     className={cn(
                       'grid w-full',

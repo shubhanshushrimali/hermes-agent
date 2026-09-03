@@ -709,6 +709,7 @@ class DaemonRunner:
                     user_prompt=job.prompt,
                     session_key=f"daemon:{job.id}",
                     model=job.model,
+                    workspace_path=job.workspace_path,
                 )
                 output = result.get("final_response", result.get("agent_response", str(result)))
             except ImportError:

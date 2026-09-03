@@ -3,14 +3,17 @@
  *
  * Appears as a floating input at the cursor/selection position.
  * User types a natural language instruction, the agent returns
- * a code replacement shown as an inline diff.
+ * a code replacement shown as line-level hunks (Keep / skip per hunk).
  *
  * Part of Phase 4: IDE-Grade Code Experience.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import { requestInlineEdit, applyInlineEdit } from '@/lib/inline-edit'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { requestInlineEdit } from '@/lib/inline-edit'
+import { applyHunks, lineHunks, type LineHunk } from '@/lib/line-hunks'
 import { cn } from '@/lib/utils'
 
 interface InlineEditWidgetProps {
@@ -32,6 +35,21 @@ interface InlineEditWidgetProps {
   onApply: (replacement: string) => void
 }
 
+function hunkLabel(kind: LineHunk['kind']): string {
+  switch (kind) {
+    case 'equal':
+      return ' '
+    case 'del':
+      return '-'
+    case 'add':
+      return '+'
+    default: {
+      const _never: never = kind
+      return _never
+    }
+  }
+}
+
 export function InlineEditWidget({
   selectedCode,
   filePath,
@@ -46,29 +64,40 @@ export function InlineEditWidget({
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [skipped, setSkipped] = useState<Set<number>>(() => new Set())
   const inputRef = useRef<HTMLInputElement>(null)
 
-  // Auto-focus the input
+  const hunks = useMemo(
+    () => (result === null ? [] : lineHunks(selectedCode, result)),
+    [result, selectedCode]
+  )
+
   useEffect(() => {
     inputRef.current?.focus()
   }, [])
 
-  // Escape to close
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.stopPropagation()
         onClose()
+        return
+      }
+      if (e.key === 'Tab' && result !== null && !loading) {
+        e.preventDefault()
+        e.stopPropagation()
+        onApply(applyHunks(hunks, skipped))
       }
     }
     document.addEventListener('keydown', handler, true)
     return () => document.removeEventListener('keydown', handler, true)
-  }, [onClose])
+  }, [onClose, onApply, result, loading, hunks, skipped])
 
   const handleSubmit = useCallback(async () => {
     if (!instruction.trim() || loading) return
     setLoading(true)
     setError(null)
+    setSkipped(new Set())
 
     const res = await requestInlineEdit({
       filePath,
@@ -89,170 +118,114 @@ export function InlineEditWidget({
 
   const handleAccept = useCallback(() => {
     if (result !== null) {
-      onApply(result)
+      onApply(applyHunks(hunks, skipped))
     }
-  }, [result, onApply])
+  }, [result, onApply, hunks, skipped])
+
+  const toggleHunk = (index: number, kind: LineHunk['kind']) => {
+    if (kind === 'equal') {
+      return
+    }
+    setSkipped(prev => {
+      const next = new Set(prev)
+      if (next.has(index)) {
+        next.delete(index)
+      } else {
+        next.add(index)
+      }
+      return next
+    })
+  }
 
   return (
     <div
-      className="aizen-glass aizen-toast"
+      className="overflow-hidden rounded-lg border border-border bg-background shadow-md"
+      onClick={e => e.stopPropagation()}
       style={{
+        left: position.left,
         position: 'absolute',
         top: position.top,
-        left: position.left,
-        zIndex: 100,
-        width: 400,
-        borderRadius: 8,
-        padding: 0,
-        overflow: 'hidden',
+        width: 420,
+        zIndex: 100
       }}
-      onClick={(e) => e.stopPropagation()}
     >
-      {/* Input area */}
-      <div style={{ padding: '10px 12px', display: 'flex', gap: 8, alignItems: 'center' }}>
-        <span
-          style={{
-            fontFamily: '"JetBrains Mono", monospace',
-            fontSize: 11,
-            color: '#6366F1',
-            fontWeight: 600,
-            whiteSpace: 'nowrap',
-          }}
-        >
-          ⌘K
-        </span>
-        <input
-          ref={inputRef}
-          type="text"
-          value={instruction}
-          onChange={(e) => setInstruction(e.target.value)}
-          onKeyDown={(e) => {
+      <div className="flex items-center gap-2 px-3 py-2">
+        <span className="shrink-0 font-mono text-[0.6875rem] font-semibold text-(--ui-text-tertiary)">⌘K</span>
+        <Input
+          disabled={loading}
+          onChange={e => setInstruction(e.target.value)}
+          onKeyDown={e => {
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault()
-              handleSubmit()
+              void handleSubmit()
             }
           }}
           placeholder="Describe the change..."
-          disabled={loading}
-          className="aizen-input-glow"
-          style={{
-            flex: 1,
-            background: 'transparent',
-            border: '1px solid #23262F',
-            borderRadius: 4,
-            padding: '6px 8px',
-            fontFamily: 'Inter, system-ui, sans-serif',
-            fontSize: 13,
-            color: '#E4E4E7',
-            outline: 'none',
-          }}
+          ref={inputRef}
+          size="sm"
+          type="text"
+          value={instruction}
         />
       </div>
 
-      {/* Loading state */}
       {loading && (
-        <div
-          style={{
-            padding: '8px 12px',
-            borderTop: '1px solid #23262F',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-          }}
-        >
-          <div className="aizen-status-active" style={{ width: 6, height: 6, borderRadius: '50%', background: '#6366F1' }} />
-          <span style={{ fontFamily: 'Inter, system-ui, sans-serif', fontSize: 12, color: '#A1A1AA' }}>
-            Generating edit…
-          </span>
+        <div className="flex items-center gap-2 border-t border-border px-3 py-2">
+          <span className="size-1.5 rounded-full bg-primary" />
+          <span className="text-xs text-muted-foreground">Generating edit…</span>
         </div>
       )}
 
-      {/* Error state */}
       {error && (
-        <div
-          style={{
-            padding: '8px 12px',
-            borderTop: '1px solid #23262F',
-            fontFamily: 'Inter, system-ui, sans-serif',
-            fontSize: 12,
-            color: '#EF4444',
-          }}
-        >
-          {error}
-        </div>
+        <div className="border-t border-border px-3 py-2 text-xs text-destructive">{error}</div>
       )}
 
-      {/* Result diff preview */}
       {result !== null && (
-        <div style={{ borderTop: '1px solid #23262F' }}>
-          {/* Diff view */}
-          <div
-            style={{
-              padding: '8px 12px',
-              maxHeight: 200,
-              overflow: 'auto',
-              fontFamily: '"JetBrains Mono", monospace',
-              fontSize: 12,
-              lineHeight: 1.6,
-            }}
-          >
-            {/* Removed lines */}
-            {selectedCode.split('\n').map((line, i) => (
-              <div key={`r-${i}`} className="aizen-diff-remove" style={{ padding: '0 4px' }}>
-                - {line}
-              </div>
-            ))}
-            {/* Added lines */}
-            {result.split('\n').map((line, i) => (
-              <div key={`a-${i}`} className="aizen-diff-add" style={{ padding: '0 4px' }}>
-                + {line}
-              </div>
-            ))}
+        <div className="border-t border-border">
+          <div className="max-h-60 overflow-auto px-3 py-2 font-mono text-xs leading-5">
+            {hunks.map((hunk, index) => {
+              const skippedHunk = skipped.has(index)
+              const interactive = hunk.kind !== 'equal'
+              return (
+                <div className="mb-1" key={`${hunk.kind}-${index}`}>
+                  {interactive && (
+                    <Button
+                      className="mb-0.5 h-auto px-0 text-[0.625rem]"
+                      onClick={() => toggleHunk(index, hunk.kind)}
+                      size="inline"
+                      type="button"
+                      variant="text"
+                    >
+                      {skippedHunk ? 'Skipped' : 'Keep'} {hunk.kind === 'add' ? 'additions' : 'deletions'}
+                    </Button>
+                  )}
+                  {hunk.lines.map((line, lineIndex) => (
+                    <div
+                      className={cn(
+                        'px-1',
+                        hunk.kind === 'del' && !skippedHunk && 'bg-destructive/15 text-destructive',
+                        hunk.kind === 'add' && !skippedHunk && 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400'
+                      )}
+                      key={`${index}-${lineIndex}`}
+                      style={{ opacity: skippedHunk ? 0.4 : 1 }}
+                    >
+                      {hunkLabel(hunk.kind)} {line}
+                    </div>
+                  ))}
+                </div>
+              )
+            })}
           </div>
 
-          {/* Action buttons */}
-          <div
-            style={{
-              padding: '8px 12px',
-              borderTop: '1px solid #23262F',
-              display: 'flex',
-              justifyContent: 'flex-end',
-              gap: 8,
-            }}
-          >
-            <button
-              onClick={onClose}
-              className="aizen-btn-press"
-              style={{
-                background: 'transparent',
-                border: '1px solid #23262F',
-                borderRadius: 4,
-                padding: '4px 12px',
-                fontFamily: 'Inter, system-ui, sans-serif',
-                fontSize: 12,
-                color: '#A1A1AA',
-                cursor: 'pointer',
-              }}
-            >
-              Reject
-            </button>
-            <button
-              onClick={handleAccept}
-              className="aizen-btn-press"
-              style={{
-                background: '#6366F1',
-                border: 'none',
-                borderRadius: 4,
-                padding: '4px 12px',
-                fontFamily: 'Inter, system-ui, sans-serif',
-                fontSize: 12,
-                fontWeight: 500,
-                color: '#ffffff',
-                cursor: 'pointer',
-              }}
-            >
-              Accept
-            </button>
+          <div className="flex items-center justify-between gap-2 border-t border-border px-3 py-2">
+            <span className="text-[0.625rem] text-muted-foreground">Tab accept · Esc reject</span>
+            <div className="flex gap-2">
+              <Button onClick={onClose} size="sm" type="button" variant="outline">
+                Reject
+              </Button>
+              <Button onClick={handleAccept} size="sm" type="button">
+                Accept
+              </Button>
+            </div>
           </div>
         </div>
       )}

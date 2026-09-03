@@ -28,11 +28,12 @@ Integration with graph_engine.py:
 
 from __future__ import annotations
 
+import ast
+import hashlib
 import json
 import logging
 import os
 import re
-import sqlite3
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -88,6 +89,9 @@ class CodebaseGraph:
     indexed_at: float = 0.0
     file_count: int = 0
     language_stats: Dict[str, int] = field(default_factory=dict)
+    backend: str = "regex"
+    warnings: List[str] = field(default_factory=list)
+    file_mtimes: Dict[str, float] = field(default_factory=dict)
 
     @property
     def node_count(self) -> int:
@@ -130,7 +134,11 @@ class CodebaseGraph:
         """
         lines = [f"# Codebase Graph: {os.path.basename(self.workspace_path)}"]
         lines.append(f"# {self.node_count} nodes, {self.edge_count} edges, "
-                     f"{self.file_count} files")
+                     f"{self.file_count} files ({self.backend})")
+        if self.warnings:
+            lines.append("# Warnings:")
+            for warning in self.warnings:
+                lines.append(f"#   {warning}")
         lines.append("")
 
         # Group by file.
@@ -162,6 +170,9 @@ class CodebaseGraph:
             "indexed_at": self.indexed_at,
             "file_count": self.file_count,
             "language_stats": self.language_stats,
+            "backend": self.backend,
+            "warnings": list(self.warnings or []),
+            "file_mtimes": dict(self.file_mtimes or {}),
             "nodes": {k: v.to_dict() for k, v in self.nodes.items()},
             "edges": [
                 {"source": e.source, "target": e.target,
@@ -312,6 +323,189 @@ def _extract_imports_regex(file_path: Path, language: str) -> List[str]:
     return imports
 
 
+def _parse_file_python_ast(file_path: Path) -> tuple[List[GraphNode], List[str]]:
+    """Extract symbols and imports from a Python file via the stdlib AST."""
+    try:
+        content = file_path.read_text(encoding="utf-8", errors="replace")
+        tree = ast.parse(content)
+    except Exception:
+        return [], []
+
+    nodes: List[GraphNode] = []
+    imports: List[str] = []
+    path_str = str(file_path)
+
+    for item in ast.walk(tree):
+        if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            name = item.name
+            if name.startswith("_") and name != "__init__":
+                continue
+            args = []
+            try:
+                args = [a.arg for a in item.args.args]
+            except Exception:
+                args = []
+            nodes.append(GraphNode(
+                id=f"{path_str}:{name}",
+                name=name,
+                kind="function",
+                file_path=path_str,
+                line_start=getattr(item, "lineno", 0),
+                language="python",
+                signature=", ".join(args)[:100],
+            ))
+        elif isinstance(item, ast.ClassDef):
+            nodes.append(GraphNode(
+                id=f"{path_str}:{item.name}",
+                name=item.name,
+                kind="class",
+                file_path=path_str,
+                line_start=getattr(item, "lineno", 0),
+                language="python",
+            ))
+        elif isinstance(item, ast.Import):
+            for alias in item.names:
+                if alias.name:
+                    imports.append(alias.name)
+        elif isinstance(item, ast.ImportFrom) and item.module:
+            imports.append(item.module)
+
+    return nodes, imports
+
+
+def _parse_file_treesitter(file_path: Path, language: str) -> Optional[tuple[List[GraphNode], List[str]]]:
+    """Optional tree-sitter parse. Returns None when the grammar is missing."""
+    lang_mod = None
+    try:
+        if language == "python":
+            import tree_sitter_python as lang_mod
+        elif language in ("javascript", "typescript"):
+            import tree_sitter_javascript as lang_mod
+        else:
+            return None
+        import tree_sitter
+    except ImportError:
+        return None
+
+    try:
+        parser = tree_sitter.Parser(tree_sitter.Language(lang_mod.language()))
+        source = file_path.read_bytes()
+        tree = parser.parse(source)
+    except Exception:
+        return None
+
+    text = source.decode("utf-8", errors="replace")
+    nodes: List[GraphNode] = []
+    imports: List[str] = []
+    path_str = str(file_path)
+
+    def _node_text(node: Any) -> str:
+        return text[node.start_byte:node.end_byte]
+
+    def _walk(node: Any) -> None:
+        kind = node.type
+        if kind in ("function_definition", "function_declaration", "method_definition"):
+            name_node = node.child_by_field_name("name")
+            if name_node is not None:
+                name = _node_text(name_node)
+                if name and not (name.startswith("_") and name != "__init__"):
+                    nodes.append(GraphNode(
+                        id=f"{path_str}:{name}",
+                        name=name,
+                        kind="function",
+                        file_path=path_str,
+                        line_start=node.start_point[0] + 1,
+                        language=language,
+                    ))
+        elif kind in ("class_definition", "class_declaration"):
+            name_node = node.child_by_field_name("name")
+            if name_node is not None:
+                name = _node_text(name_node)
+                nodes.append(GraphNode(
+                    id=f"{path_str}:{name}",
+                    name=name,
+                    kind="class",
+                    file_path=path_str,
+                    line_start=node.start_point[0] + 1,
+                    language=language,
+                ))
+        elif kind in ("import_statement", "import_from_statement"):
+            imports.append(_node_text(node)[:200])
+        for child in node.children:
+            _walk(child)
+
+    _walk(tree.root_node)
+    return nodes, imports
+
+
+def _parse_file(file_path: Path, language: str) -> tuple[List[GraphNode], List[str], str]:
+    """Parse one file. Prefer tree-sitter, then Python AST, then regex."""
+    ts = _parse_file_treesitter(file_path, language)
+    if ts is not None:
+        return ts[0], ts[1], "treesitter"
+    if language == "python":
+        nodes, imports = _parse_file_python_ast(file_path)
+        if nodes or imports:
+            return nodes, imports, "ast"
+    return (
+        _parse_file_regex(file_path, language),
+        _extract_imports_regex(file_path, language),
+        "regex",
+    )
+
+
+_STOPWORDS = {
+    "the", "and", "for", "with", "that", "this", "from", "what", "how",
+    "why", "when", "where", "does", "into", "code", "file", "class",
+    "function", "please", "just", "need", "want", "make", "call",
+    "calls", "fix", "bug", "error", "add", "you", "can",
+}
+
+_FILE_IN_PROMPT_RE = re.compile(
+    r"[\w./\\-]+\.(?:py|ts|tsx|js|jsx|go|rs|java|cpp|c|h|rb|php)\b",
+    re.IGNORECASE,
+)
+_IDENT_RE = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]{2,}\b")
+_ACTIVE_FILE_RE = re.compile(r"Active file:\s+(\S+)")
+
+
+def extract_query_terms(question: str) -> List[str]:
+    """Identifiers and file paths worth looking up in the graph."""
+    seen: Set[str] = set()
+    terms: List[str] = []
+    for term in _FILE_IN_PROMPT_RE.findall(question) + _IDENT_RE.findall(question):
+        key = term.lower()
+        if key in _STOPWORDS or key in seen:
+            continue
+        seen.add(key)
+        terms.append(term)
+    return terms
+
+
+def active_file_from_prompt(prompt: str) -> str:
+    """Editor sidecar line: ``Active file: path``."""
+    match = _ACTIVE_FILE_RE.search(prompt or "")
+    return match.group(1) if match else ""
+
+
+def _pick_backend(used: Set[str]) -> str:
+    if "treesitter" in used:
+        return "treesitter"
+    if "ast" in used:
+        return "ast"
+    return "regex"
+
+
+def _backend_rank_value(parser: str) -> int:
+    if parser == "treesitter":
+        return 3
+    if parser == "ast":
+        return 2
+    if parser == "regex":
+        return 1
+    return 0
+
+
 # ============================================================================
 # Codebase Graph Manager
 # ============================================================================
@@ -348,34 +542,34 @@ class CodebaseGraphManager:
         """
         workspace_path = os.path.abspath(workspace_path)
 
-        # Check cache.
         if not force and workspace_path in self._graphs:
             cached = self._graphs[workspace_path]
-            # Re-index if older than 1 hour.
-            if time.time() - cached.indexed_at < 3600:
-                return cached
+            self._refresh_stale_files(cached)
+            return cached
 
-        # Try loading from disk cache.
         cache_file = self._cache_path(workspace_path)
         if not force and os.path.exists(cache_file):
             try:
                 graph = self._load_cache(cache_file)
-                if graph and time.time() - graph.indexed_at < 3600:
+                if graph:
                     self._graphs[workspace_path] = graph
+                    self._refresh_stale_files(graph)
                     return graph
             except Exception:
                 pass
 
-        # Try Graphify first (best quality).
+        warnings: List[str] = []
         if use_graphify:
-            graph = self._try_graphify(workspace_path)
+            graph, warnings = self._try_graphify(workspace_path)
             if graph:
+                graph.warnings = list(warnings)
+                self._stamp_mtimes(graph)
                 self._graphs[workspace_path] = graph
                 self._save_cache(cache_file, graph)
                 return graph
 
-        # Fallback: built-in regex parser.
-        graph = self._index_regex(workspace_path)
+        graph = self._index_builtin(workspace_path)
+        graph.warnings = list(warnings)
         self._graphs[workspace_path] = graph
         self._save_cache(cache_file, graph)
         return graph
@@ -385,39 +579,235 @@ class CodebaseGraphManager:
         return self._graphs.get(os.path.abspath(workspace_path))
 
     def query(self, workspace_path: str, question: str) -> str:
-        """Query the graph with natural language. Returns context string."""
+        """Query the graph with natural language. Returns focused context."""
+        return self.retrieve_context(workspace_path, question)
+
+    def retrieve_context(
+        self,
+        workspace_path: str,
+        question: str,
+        active_file: str = "",
+        max_tokens: int = 2000,
+    ) -> str:
+        """Retrieve neighbors of mentioned symbols and the active file.
+
+        Does not dump the full repo map when anything matches.
+        """
         graph = self.get_graph(workspace_path)
         if not graph:
             return "Workspace not indexed. Call index_workspace first."
 
-        # Simple keyword extraction from question.
-        words = re.findall(r'\b\w{3,}\b', question)
-        relevant_nodes = []
-        for word in words:
-            results = graph.search_nodes(word)
-            relevant_nodes.extend(results[:3])
+        if not active_file:
+            active_file = active_file_from_prompt(question)
 
-        if not relevant_nodes:
-            return graph.to_context_string(max_tokens=1000)
+        lines: List[str] = [f"# Relevant code for: {question[:120]}\n"]
+        budget_chars = max_tokens * 4
+        seen: Set[str] = set()
+        matched_symbols = 0
+        file_ctx = ""
 
-        # Build focused context.
-        lines = [f"# Relevant code for: {question}\n"]
-        seen = set()
-        for node in relevant_nodes[:10]:
+        if active_file:
+            abs_file = (
+                active_file
+                if os.path.isabs(active_file)
+                else os.path.join(workspace_path, active_file)
+            )
+            file_ctx = self.get_context_for_file(workspace_path, os.path.abspath(abs_file))
+            if file_ctx:
+                lines.append(file_ctx)
+                seen.add(os.path.abspath(abs_file))
+
+        terms = extract_query_terms(question)
+        ranked: List[GraphNode] = []
+        for term in terms:
+            exact = [n for n in graph.nodes.values() if n.name.lower() == term.lower()]
+            if exact:
+                ranked.extend(exact)
+                continue
+            ranked.extend(graph.search_nodes(re.escape(term))[:5])
+
+        for node in ranked[:12]:
             if node.id in seen:
                 continue
             seen.add(node.id)
-            lines.append(f"- **{node.kind}** `{node.name}` in `{os.path.basename(node.file_path)}` L{node.line_start}")
+            matched_symbols += 1
+            rel = (
+                os.path.relpath(node.file_path, workspace_path)
+                if node.file_path
+                else "?"
+            )
+            lines.append(
+                f"- **{node.kind}** `{node.name}` in `{rel}` L{node.line_start}"
+            )
             if node.signature:
                 lines.append(f"  Signature: `{node.signature}`")
+            for n_node, n_edge in graph.get_neighbors(node.id)[:5]:
+                lines.append(f"  -> {n_edge.kind} `{n_node.name}` ({n_node.kind})")
 
-            # Add neighbors.
-            neighbors = graph.get_neighbors(node.id)
-            if neighbors:
-                for n_node, n_edge in neighbors[:5]:
-                    lines.append(f"  -> {n_edge.kind} `{n_node.name}` ({n_node.kind})")
+        body = "\n".join(lines)
+        if matched_symbols == 0 and not file_ctx:
+            # Nothing matched — file names only, not a full symbol dump.
+            file_names = [
+                os.path.relpath(n.file_path, workspace_path)
+                for n in graph.nodes.values()
+                if n.kind == "file" and n.file_path
+            ]
+            preview = "\n".join(f"- {name}" for name in sorted(file_names)[:40])
+            body = (
+                f"# Files in {os.path.basename(workspace_path)} "
+                f"({graph.backend}, {graph.file_count} files)\n{preview}"
+            )
 
-        return "\n".join(lines)
+        if len(body) > budget_chars:
+            return body[:budget_chars] + "\n..."
+        return body
+
+    def index_file(self, workspace_path: str, file_path: str) -> Optional[CodebaseGraph]:
+        """Re-parse a single file into the in-memory graph."""
+        workspace_path = os.path.abspath(workspace_path)
+        file_path = os.path.abspath(file_path)
+        graph = self.get_graph(workspace_path)
+        if graph is None:
+            graph = self.index_workspace(workspace_path)
+        if not _should_index(Path(file_path)):
+            return graph
+
+        self._drop_file_nodes(graph, file_path)
+        language = _LANGUAGE_MAP.get(Path(file_path).suffix.lower(), "")
+        if not language:
+            return graph
+
+        path = Path(file_path)
+        graph.nodes[file_path] = GraphNode(
+            id=file_path,
+            name=path.name,
+            kind="file",
+            file_path=file_path,
+            language=language,
+        )
+        symbols, imports, parser = _parse_file(path, language)
+        if _backend_rank_value(parser) > _backend_rank_value(graph.backend):
+            graph.backend = parser
+        for sym in symbols:
+            graph.nodes[sym.id] = sym
+            graph.edges.append(GraphEdge(
+                source=file_path,
+                target=sym.id,
+                kind="defines",
+                confidence="EXTRACTED",
+            ))
+        for imp in imports:
+            graph.edges.append(GraphEdge(
+                source=file_path,
+                target=f"import:{imp}",
+                kind="imports",
+                confidence="EXTRACTED",
+            ))
+        try:
+            graph.file_mtimes[file_path] = os.path.getmtime(file_path)
+        except OSError:
+            pass
+        graph.indexed_at = time.time()
+        graph.file_count = len({n.file_path for n in graph.nodes.values() if n.kind == "file"})
+        self._save_cache(self._cache_path(workspace_path), graph)
+        return graph
+
+    def graph_status(self, workspace_path: str) -> dict:
+        """Payload for the composer chip and GET /api/graph/status."""
+        workspace_path = os.path.abspath(workspace_path) if workspace_path else ""
+        graph = self.get_graph(workspace_path) if workspace_path else None
+        if not graph:
+            return {
+                "indexed": False,
+                "backend": "none",
+                "nodes": 0,
+                "edges": 0,
+                "files": 0,
+                "warnings": [],
+                "indexed_at": 0,
+                "stale": True,
+                "degraded": False,
+            }
+        stale = self._is_stale(graph)
+        return {
+            "indexed": True,
+            "backend": graph.backend,
+            "nodes": graph.node_count,
+            "edges": graph.edge_count,
+            "files": graph.file_count,
+            "warnings": list(graph.warnings or []),
+            "indexed_at": graph.indexed_at,
+            "stale": stale,
+            "degraded": graph.backend == "regex",
+        }
+
+    def _drop_file_nodes(self, graph: CodebaseGraph, file_path: str) -> None:
+        drop_ids = {
+            nid for nid, node in graph.nodes.items()
+            if node.file_path == file_path or nid == file_path
+        }
+        for nid in drop_ids:
+            graph.nodes.pop(nid, None)
+        graph.edges = [
+            edge for edge in graph.edges
+            if edge.source not in drop_ids and edge.target not in drop_ids
+        ]
+        graph.file_mtimes.pop(file_path, None)
+
+    def _stamp_mtimes(self, graph: CodebaseGraph) -> None:
+        for node in graph.nodes.values():
+            if node.kind != "file" or not node.file_path:
+                continue
+            try:
+                graph.file_mtimes[node.file_path] = os.path.getmtime(node.file_path)
+            except OSError:
+                pass
+
+    def _is_stale(self, graph: CodebaseGraph) -> bool:
+        checked = 0
+        for path, stamped in list(graph.file_mtimes.items())[:80]:
+            try:
+                if os.path.getmtime(path) - stamped > 1.0:
+                    return True
+            except OSError:
+                continue
+            checked += 1
+        return False
+
+    def _refresh_stale_files(self, graph: CodebaseGraph) -> None:
+        stale_paths: List[str] = []
+        for path, stamped in list(graph.file_mtimes.items()):
+            try:
+                if os.path.getmtime(path) - stamped > 1.0:
+                    stale_paths.append(path)
+            except OSError:
+                continue
+            if len(stale_paths) >= 20:
+                break
+        for path in stale_paths:
+            self.index_file(graph.workspace_path, path)
+
+    def graph_context_for_turn(
+        self,
+        workspace_path: str,
+        prompt: str,
+        active_file: str = "",
+        max_tokens: int = 2000,
+    ) -> tuple[str, List[str], dict]:
+        """Index if needed, then retrieve. Returns (context, warnings, status)."""
+        workspace_path = os.path.abspath(workspace_path)
+        graph = self.get_graph(workspace_path)
+        if graph is None:
+            graph = self.index_workspace(workspace_path)
+        status = self.graph_status(workspace_path)
+        warnings = list(getattr(graph, "warnings", []) or [])
+        context = self.retrieve_context(
+            workspace_path,
+            prompt,
+            active_file=active_file,
+            max_tokens=max_tokens,
+        )
+        return context, warnings, status
 
     def get_context_for_file(self, workspace_path: str, file_path: str) -> str:
         """Get graph context relevant to a specific file.
@@ -448,24 +838,31 @@ class CodebaseGraphManager:
     # Graphify Integration
     # ----------------------------------------------------------------
 
-    def _try_graphify(self, workspace_path: str) -> Optional[CodebaseGraph]:
-        """Try using Graphify for high-quality graph generation."""
+    def _try_graphify(self, workspace_path: str) -> tuple[Optional[CodebaseGraph], List[str]]:
+        """Try using Graphify for high-quality graph generation.
+
+        Failures are warnings, never silent. The caller falls back to regex
+        and surfaces ``warnings`` on the returned graph and in API JSON.
+        """
+        warnings: List[str] = []
         try:
             import subprocess
-            # Check if graphify is available.
             result = subprocess.run(
                 ["graphify", "--version"],
                 capture_output=True, text=True, timeout=5,
             )
             if result.returncode != 0:
-                return None
+                msg = (result.stderr or result.stdout or "graphify --version failed").strip()
+                warnings.append(f"Graphify version check failed: {msg}")
+                logger.warning("Graphify not usable: %s", msg)
+                return None, warnings
 
-            # Check if graph.json already exists.
             graph_json = os.path.join(workspace_path, "graphify-out", "graph.json")
             if os.path.exists(graph_json):
-                return self._load_graphify_json(workspace_path, graph_json)
+                graph = self._load_graphify_json(workspace_path, graph_json)
+                graph.backend = "graphify"
+                return graph, warnings
 
-            # Generate the graph (Pass 1 only — deterministic, no LLM cost).
             logger.info("Running Graphify on %s (Pass 1, deterministic)...", workspace_path)
             result = subprocess.run(
                 ["graphify", workspace_path, "--pass", "1"],
@@ -474,14 +871,30 @@ class CodebaseGraphManager:
             )
 
             if os.path.exists(graph_json):
-                return self._load_graphify_json(workspace_path, graph_json)
+                graph = self._load_graphify_json(workspace_path, graph_json)
+                graph.backend = "graphify"
+                if result.returncode != 0:
+                    extra = (result.stderr or result.stdout or "").strip()
+                    if extra:
+                        warnings.append(f"Graphify exited {result.returncode}: {extra[:500]}")
+                        logger.warning("Graphify produced graph.json with non-zero exit: %s", extra[:500])
+                return graph, warnings
 
-        except (FileNotFoundError, ImportError):
-            logger.debug("Graphify not installed — using regex fallback")
+            extra = (result.stderr or result.stdout or "no graph.json").strip()
+            warnings.append(f"Graphify produced no graph.json: {extra[:500]}")
+            logger.warning("Graphify produced no graph.json for %s: %s", workspace_path, extra[:500])
+
+        except FileNotFoundError:
+            warnings.append("Graphify not installed — using regex fallback")
+            logger.warning("Graphify not installed — using regex fallback")
+        except ImportError:
+            warnings.append("Graphify unavailable (subprocess import failed) — using regex fallback")
+            logger.warning("Graphify unavailable — using regex fallback")
         except Exception as e:
-            logger.debug("Graphify failed: %s — using regex fallback", e)
+            warnings.append(f"Graphify failed: {e}")
+            logger.warning("Graphify failed: %s — using regex fallback", e)
 
-        return None
+        return None, warnings
 
     def _load_graphify_json(self, workspace_path: str, json_path: str) -> CodebaseGraph:
         """Load a Graphify-generated graph.json into our CodebaseGraph."""
@@ -491,6 +904,7 @@ class CodebaseGraphManager:
         graph = CodebaseGraph(
             workspace_path=workspace_path,
             indexed_at=time.time(),
+            backend="graphify",
         )
 
         # Parse Graphify nodes.
@@ -524,15 +938,17 @@ class CodebaseGraphManager:
     # Built-in Regex Parser
     # ----------------------------------------------------------------
 
-    def _index_regex(self, workspace_path: str) -> CodebaseGraph:
-        """Build a graph using regex-based symbol extraction."""
+    def _index_builtin(self, workspace_path: str) -> CodebaseGraph:
+        """Build a graph using tree-sitter, Python AST, then regex."""
         graph = CodebaseGraph(
             workspace_path=workspace_path,
             indexed_at=time.time(),
+            backend="regex",
         )
 
         root = Path(workspace_path)
         files_indexed = 0
+        used: Set[str] = set()
 
         for path in root.rglob("*"):
             if not path.is_file() or not _should_index(path):
@@ -542,25 +958,21 @@ class CodebaseGraphManager:
             if not language:
                 continue
 
-            # Count language stats.
             graph.language_stats[language] = graph.language_stats.get(language, 0) + 1
 
-            # Add file node.
             file_id = str(path)
             graph.nodes[file_id] = GraphNode(
                 id=file_id,
                 name=path.name,
                 kind="file",
-                file_path=str(path),
+                file_path=file_id,
                 language=language,
             )
 
-            # Extract symbols.
-            symbols = _parse_file_regex(path, language)
+            symbols, imports, parser = _parse_file(path, language)
+            used.add(parser)
             for sym in symbols:
                 graph.nodes[sym.id] = sym
-
-                # Edge: file defines symbol.
                 graph.edges.append(GraphEdge(
                     source=file_id,
                     target=sym.id,
@@ -568,8 +980,6 @@ class CodebaseGraphManager:
                     confidence="EXTRACTED",
                 ))
 
-            # Extract imports.
-            imports = _extract_imports_regex(path, language)
             for imp in imports:
                 graph.edges.append(GraphEdge(
                     source=file_id,
@@ -578,14 +988,24 @@ class CodebaseGraphManager:
                     confidence="EXTRACTED",
                 ))
 
+            try:
+                graph.file_mtimes[file_id] = os.path.getmtime(file_id)
+            except OSError:
+                pass
+
             files_indexed += 1
 
         graph.file_count = files_indexed
+        graph.backend = _pick_backend(used)
         logger.info(
-            "Regex index complete: %d files, %d nodes, %d edges",
-            files_indexed, graph.node_count, graph.edge_count,
+            "Builtin index complete: %d files, %d nodes, %d edges (%s)",
+            files_indexed, graph.node_count, graph.edge_count, graph.backend,
         )
         return graph
+
+    def _index_regex(self, workspace_path: str) -> CodebaseGraph:
+        """Back-compat alias used by tests that patch the builtin indexer."""
+        return self._index_builtin(workspace_path)
 
     # ----------------------------------------------------------------
     # Caching
@@ -593,7 +1013,6 @@ class CodebaseGraphManager:
 
     def _cache_path(self, workspace_path: str) -> str:
         """Get cache file path for a workspace."""
-        import hashlib
         h = hashlib.sha256(workspace_path.encode()).hexdigest()[:12]
         return os.path.join(self._cache_dir, f"graph_{h}.json")
 
@@ -614,6 +1033,9 @@ class CodebaseGraphManager:
                 indexed_at=data["indexed_at"],
                 file_count=data["file_count"],
                 language_stats=data.get("language_stats", {}),
+                backend=data.get("backend", "regex"),
+                warnings=list(data.get("warnings") or []),
+                file_mtimes=dict(data.get("file_mtimes") or {}),
             )
             for nid, ndata in data.get("nodes", {}).items():
                 graph.nodes[nid] = GraphNode(**ndata)

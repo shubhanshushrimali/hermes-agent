@@ -18,8 +18,6 @@ Part of Phase 2, 4, 7: wiring orphaned gateway modules.
 
 from __future__ import annotations
 
-import asyncio
-import json
 import logging
 from typing import Any, Optional
 
@@ -113,21 +111,18 @@ def _register_mobile_auth_routes(app: Any) -> None:
 # ============================================================================
 
 def _register_mcp_apps_routes(app: Any) -> None:
-    """Register MCP Apps routes."""
+    """Register MCP Apps routes against MCPAppRegistry.build / describe_apps."""
     try:
         from aiohttp import web
-        from gateway.mcp_apps import MCPApp, MCPAppRegistry
+        from gateway.mcp_apps import MCPAppRegistry
     except ImportError as e:
         logger.debug("MCP Apps routes not registered: %s", e)
         return
 
-    _registry = MCPAppRegistry()
-
     async def handle_list_apps(request: web.Request) -> web.Response:
-        apps = _registry.list_apps()
         return web.json_response({
             "ok": True,
-            "apps": [a.to_message() for a in apps],
+            "apps": MCPAppRegistry.describe_apps(),
         })
 
     async def handle_run_app(request: web.Request) -> web.Response:
@@ -136,17 +131,14 @@ def _register_mcp_apps_routes(app: Any) -> None:
             data = await request.json()
         except Exception:
             data = {}
-        try:
-            result = _registry.run_app(app_id, data)
-            return web.json_response({"ok": True, "result": result})
-        except KeyError:
+        if not isinstance(data, dict):
+            data = {}
+        built = MCPAppRegistry.build(app_id, **data)
+        if built is None:
             return web.json_response(
                 {"ok": False, "error": f"App '{app_id}' not found"}, status=404
             )
-        except Exception as e:
-            return web.json_response(
-                {"ok": False, "error": str(e)}, status=500
-            )
+        return web.json_response({"ok": True, "result": built.to_message()})
 
     app.router.add_get("/api/mcp/apps", handle_list_apps)
     app.router.add_post("/api/mcp/apps/{app_id}/run", handle_run_app)
@@ -157,25 +149,25 @@ def _register_mcp_apps_routes(app: Any) -> None:
 # Recipes Routes
 # ============================================================================
 
-def _register_recipes_routes(app: Any, get_agent_fn: Any = None) -> None:
-    """Register Recipes routes."""
+def _register_recipes_routes(app: Any) -> None:
+    """Register Recipes routes via RecipeLibrary (not RecipeRunner())."""
     try:
         from aiohttp import web
-        from gateway.recipes import RecipeRunner
+        from gateway.recipes import RecipeLibrary, default_recipes_dir, execute_recipe
+        from gateway.session_prompt import run_session_prompt, session_turn_kwargs
     except ImportError as e:
         logger.debug("Recipes routes not registered: %s", e)
         return
 
-    _runner = RecipeRunner()
+    library = RecipeLibrary(default_recipes_dir())
+
+    def _adapter():
+        return app.get("api_server_adapter")
 
     async def handle_list_recipes(request: web.Request) -> web.Response:
-        recipes = _runner.list_recipes()
         return web.json_response({
             "ok": True,
-            "recipes": [
-                {"name": r.name, "description": r.description}
-                for r in recipes
-            ],
+            "recipes": library.list_recipes(),
         })
 
     async def handle_run_recipe(request: web.Request) -> web.Response:
@@ -184,9 +176,38 @@ def _register_recipes_routes(app: Any, get_agent_fn: Any = None) -> None:
             data = await request.json()
         except Exception:
             data = {}
+        if not isinstance(data, dict):
+            data = {}
+        recipe = library.load(name)
+        if recipe is None:
+            return web.json_response(
+                {"ok": False, "error": f"Recipe '{name}' not found"}, status=404
+            )
+        workspace = str(data.get("workspace") or data.get("cwd") or "")
+        kwargs = session_turn_kwargs(data)
+        adapter = _adapter()
+
+        async def _run_agent(prompt: str) -> str:
+            return await run_session_prompt(
+                prompt,
+                timeout=300.0,
+                session_id=kwargs["session_id"] or f"recipe_{name}",
+                adapter=adapter,
+                cwd=workspace or kwargs["cwd"],
+                model=kwargs["model"],
+                persist=bool(kwargs["session_id"]),
+            )
+
         try:
-            result = await asyncio.get_event_loop().run_in_executor(
-                None, lambda: _runner.run(name, context=data, agent=get_agent_fn() if get_agent_fn else None)
+            result = await execute_recipe(
+                recipe,
+                context={
+                    k: v
+                    for k, v in data.items()
+                    if k not in {"workspace", "cwd", "sessionId", "session_id", "model"}
+                },
+                run_agent=_run_agent,
+                workspace=workspace,
             )
             return web.json_response({"ok": True, "result": result})
         except FileNotFoundError:
@@ -194,9 +215,8 @@ def _register_recipes_routes(app: Any, get_agent_fn: Any = None) -> None:
                 {"ok": False, "error": f"Recipe '{name}' not found"}, status=404
             )
         except Exception as e:
-            return web.json_response(
-                {"ok": False, "error": str(e)}, status=500
-            )
+            logger.exception("Recipe %s failed", name)
+            return web.json_response({"ok": False, "error": str(e)}, status=500)
 
     app.router.add_get("/api/recipes", handle_list_recipes)
     app.router.add_post("/api/recipes/{name}/run", handle_run_recipe)
@@ -207,39 +227,38 @@ def _register_recipes_routes(app: Any, get_agent_fn: Any = None) -> None:
 # Public wiring entry point
 # ============================================================================
 
+def _safe_register(name: str, fn) -> None:
+    """One extension must not abort the rest of the overlay."""
+    try:
+        fn()
+    except Exception:
+        logger.exception("Extension %s failed to register; continuing", name)
+
+
 def register_aizen_extensions(app: Any, get_agent_fn: Any = None) -> None:
     """
     Register all Aizen extension routes on an aiohttp application.
 
     Call this after the core API server routes are registered.
-
-    Parameters
-    ----------
-    app : aiohttp.web.Application
-        The running aiohttp application.
-    get_agent_fn : callable, optional
-        Returns the current agent instance (for IDE features and recipes).
+    ``get_agent_fn`` is ignored — IDE and recipes use the session runtime
+    via ``app['api_server_adapter']`` / ``run_session_prompt``.
     """
-    _register_mobile_auth_routes(app)
-    _register_mcp_apps_routes(app)
-    _register_recipes_routes(app, get_agent_fn)
+    _safe_register("mobile_auth", lambda: _register_mobile_auth_routes(app))
+    _safe_register("mcp_apps", lambda: _register_mcp_apps_routes(app))
+    _safe_register("recipes", lambda: _register_recipes_routes(app))
 
-    # IDE features (inline edit, ghost completion)
-    try:
+    def _register_ide() -> None:
         from gateway.ide_features import register_ide_routes
-        register_ide_routes(app, get_agent_fn)
-    except ImportError as e:
-        logger.debug("IDE feature routes not registered: %s", e)
+        register_ide_routes(app)
 
-    # Codebase graph routes
-    _register_graph_routes(app)
+    _safe_register("ide", _register_ide)
+    _safe_register("graph", lambda: _register_graph_routes(app))
 
-    # Panel routes (git, crew, daemon, cost dashboard)
-    try:
+    def _register_panels() -> None:
         from gateway.panel_routes import register_panel_routes
         register_panel_routes(app)
-    except ImportError as e:
-        logger.debug("Panel routes not registered: %s", e)
+
+    _safe_register("panels", _register_panels)
 
     # Log integration status at startup.
     try:
@@ -347,6 +366,8 @@ def _register_graph_routes(app: Any) -> None:
                 "edges": graph.edge_count,
                 "files": graph.file_count,
                 "languages": graph.language_stats,
+                "backend": getattr(graph, "backend", "regex"),
+                "warnings": list(getattr(graph, "warnings", []) or []),
             })
         except Exception as e:
             return web.json_response({"error": str(e)}, status=500)

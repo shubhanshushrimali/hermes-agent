@@ -2607,6 +2607,8 @@ export const zh: Translations = {
     previewLabel: label => `预览 ${label}`,
     couldNotPreview: label => `无法预览 ${label}`,
     removeAttachment: label => `移除 ${label}`,
+    editorContext: '编辑器上下文',
+    editorContextWithFile: file => `编辑器 · ${file}`,
     dictating: '听写中',
     preparingAudio: '正在准备音频',
     speakingResponse: '正在朗读回复',
@@ -2697,6 +2699,17 @@ export const zh: Translations = {
     stop: '停止',
     dismiss: '关闭',
     exit: code => `退出码 ${code}`,
+    sessionBusy: 'Hermes 正在工作',
+    sessionBusyHint: '没有卡住 — 可以发送来引导，或等待。',
+    sessionBusySteer: '引导',
+    spendCap: '已达每日花费上限',
+    spendCapHint: '今日预算已用完，Hermes 已主动停止。',
+    graphIndex: '代码图谱',
+    graphIndexHint: '索引可用。',
+    graphIndexMissing: '尚未索引此文件夹。',
+    graphIndexRegex: '简易索引 — Graphify 不可用。',
+    graphIndexStale: '文件已更改，索引落后。',
+    graphIndexReindex: '重新索引',
     coding: {
       title: '工作区',
       noBranch: '无分支',
@@ -2740,7 +2753,8 @@ export const zh: Translations = {
       branchOffFrom: base => `从 ${base} 新建分支`,
       switchTo: branch => `切换到 ${branch}`,
       switchFailed: branch => `无法切换到 ${branch}`,
-      worktrees: '工作树'
+      worktrees: '工作树',
+      runTests: '运行测试'
     }
   },
 
@@ -2893,7 +2907,7 @@ export const zh: Translations = {
 
   onboarding: {
     headerTitle: '开始设置 Hermes Agent',
-    headerDesc: '连接模型提供方即可开始对话。大多数选项只需一次点击。',
+    headerDesc: '先选文件夹，再选模型，然后发送第一条提示。',
     preparingInstall: 'Hermes 正在完成安装。首次运行通常不到一分钟。',
     starting: '正在启动 Hermes…',
     lookingUpProviders: '正在查找提供方...',
@@ -2957,7 +2971,23 @@ export const zh: Translations = {
     price: (input, output) => `${input} 输入 / ${output} 输出每 Mtok`,
     change: '更改',
     startChatting: '开始',
-    docs: provider => `${provider} 文档`
+    docs: provider => `${provider} 文档`,
+    folderTitle: '选择文件夹',
+    folderDesc: '这是 Hermes 将要工作的项目。',
+    chooseFolder: '选择文件夹',
+    chooseModel: '选择模型',
+    next: '继续',
+    skip: '跳过',
+    modelTitle: '选择模型',
+    modelDesc: '之后可随时在输入框里更换。',
+    needKey: '我需要先填写 API 密钥',
+    firstPromptTitle: '第一条提示',
+    firstPromptDesc: '告诉 Hermes 你想做什么。',
+    firstPromptPlaceholder: '我们要做什么？',
+    sendFirstPrompt: '开始对话',
+    stepFolder: '文件夹',
+    stepModel: '模型',
+    stepPrompt: '提示'
   },
 
   modelPicker: {

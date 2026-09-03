@@ -1986,7 +1986,8 @@ export const ar = defineLocale({
       branchOffFrom: base => `فرع جديد من ${base}`,
       switchTo: branch => `التبديل إلى ${branch}`,
       switchFailed: branch => `تعذّر التبديل إلى ${branch}`,
-      worktrees: 'أشجار العمل'
+      worktrees: 'أشجار العمل',
+      runTests: 'تشغيل الاختبارات'
     }
   },
   updates: {

@@ -11,11 +11,14 @@ Usage (server side):
     await broadcast("git", {"branch": "main", "ahead": 2})
 
 Usage (client side):
-    const ws = new WebSocket('ws://localhost:5005/api/ws');
+    const ws = new WebSocket('ws://localhost:5005/api/overlay/ws');
     ws.onmessage = (e) => {
         const { channel, data, ts } = JSON.parse(e.data);
         // channel: 'git' | 'daemon' | 'crew' | 'cost' | 'streak' | 'system'
     };
+
+Desktop chat uses the dashboard JSON-RPC socket at ``/api/ws``. This hub
+is overlay panel pub/sub only — a different path so the two never collide.
 """
 
 from __future__ import annotations
@@ -28,6 +31,10 @@ import weakref
 from typing import Any, Dict, Optional, Set
 
 logger = logging.getLogger("hermes.ws_hub")
+
+# Overlay panel pub/sub. Desktop JSON-RPC lives on dashboard ``/api/ws``.
+OVERLAY_WS_PATH = "/api/overlay/ws"
+OVERLAY_WS_STATS_PATH = "/api/overlay/ws/stats"
 
 
 # ============================================================================
@@ -107,8 +114,8 @@ class WebSocketHub:
 
             return ws
 
-        app.router.add_get("/api/ws", ws_handler)
-        logger.info("WebSocket hub registered at /api/ws")
+        app.router.add_get(OVERLAY_WS_PATH, ws_handler)
+        logger.info("WebSocket hub registered at %s", OVERLAY_WS_PATH)
 
     async def _broadcast_async(self, channel: str, data: Dict[str, Any]) -> int:
         """Broadcast to all connected clients (async)."""

@@ -278,6 +278,7 @@
       ]
     },
     "win": {
+      "icon": "assets/icon.ico",
       "legalTrademarks": "Hermes",
       "target": [
         "nsis",
@@ -301,6 +302,11 @@
       "perMachine": false,
       "shortcutName": "Hermes",
       "uninstallDisplayName": "Hermes",
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico",
+      "installerHeaderIcon": "assets/icon.ico",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
       "warningsAsErrors": false
     }
   }

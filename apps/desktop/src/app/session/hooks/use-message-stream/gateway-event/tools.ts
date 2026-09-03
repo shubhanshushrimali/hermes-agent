@@ -6,6 +6,7 @@ import { reportMcpToolResult } from '@/store/suggestion-providers/repair'
 import { invalidateSkillSuggestionIndex } from '@/store/suggestion-providers/skill'
 import { recordToolDiff } from '@/store/tool-diffs'
 import { setSessionDraftingTool } from '@/store/tool-drafting'
+import { recordVerifyFromToolResult } from '@/store/verify-hint'
 import { notifyWorkspaceChanged, toolChangedPath, toolMayMutateFiles } from '@/store/workspace-events'
 
 import { SUBAGENT_EVENT_TYPES, toTodoPayload } from '../utils'
@@ -108,6 +109,8 @@ export function handleToolEvent(ctx: GatewayEventContext): boolean {
     if (typeof payload?.inline_diff === 'string' && payload.inline_diff.trim()) {
       recordToolDiff(payload.tool_id || payload.name || '', payload.inline_diff)
     }
+
+    recordVerifyFromToolResult(payload?.result)
 
     // A file-mutating tool just finished — nudge the git-mirroring surfaces
     // (coding rail, review pane, file tree) to refresh. Event-driven, not

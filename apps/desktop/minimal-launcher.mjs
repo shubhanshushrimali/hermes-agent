@@ -1,22 +1,24 @@
-// Minimal Electron launcher — bypasses all bootstrap/backend logic
-// Just opens the Vite renderer in a visible BrowserWindow
-import { app, BrowserWindow } from 'electron';
+// Compatibility shim: older docs/scripts pointed here, but this file
+// used to open Vite at :5174 with no backend. The real desktop app is
+// `hermes desktop` (`python -m hermes_cli.main desktop`).
+import { spawn } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
+import path from 'node:path'
 
-app.whenReady().then(() => {
-  const win = new BrowserWindow({
-    width: 1220,
-    height: 800,
-    show: true,
-    title: 'Hermes Desktop',
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true
-    }
-  });
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
+const python = process.env.HERMES_PYTHON || 'python'
+const child = spawn(python, ['-m', 'hermes_cli.main', 'desktop', ...process.argv.slice(2)], {
+  cwd: repoRoot,
+  stdio: 'inherit',
+  shell: process.platform === 'win32',
+  env: process.env,
+})
 
-  win.loadURL('http://127.0.0.1:5174/');
-  win.on('closed', () => app.quit());
-  console.log('[minimal-launcher] Window created and loading http://127.0.0.1:5174/');
-});
-
-app.on('window-all-closed', () => app.quit());
+child.on('error', (err) => {
+  console.error('[minimal-launcher] failed to start hermes desktop:', err.message)
+  process.exit(1)
+})
+child.on('exit', (code, signal) => {
+  if (signal) process.kill(process.pid, signal)
+  process.exit(code ?? 1)
+})

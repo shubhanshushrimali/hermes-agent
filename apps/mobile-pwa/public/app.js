@@ -9,11 +9,36 @@
 // Config
 // ============================================================
 
+function defaultServerUrl() {
+  const saved = localStorage.getItem('hermes-server-url')
+  if (saved !== null) return saved
+  // Same-origin when Caddy serves this PWA in front of the gateway.
+  if (typeof location !== 'undefined' && /^https?:$/.test(location.protocol)) {
+    const port = location.port
+    if (!port || port === '80' || port === '443') return ''
+  }
+  return 'http://127.0.0.1:8642'
+}
+
 const CONFIG = {
-  serverUrl: localStorage.getItem('hermes-server-url') || 'http://localhost:5005',
+  serverUrl: defaultServerUrl(),
+  apiKey: localStorage.getItem('hermes-api-key') || '',
   model: localStorage.getItem('hermes-model') || '',
   theme: localStorage.getItem('hermes-theme') || 'dark',
 };
+
+function apiUrl(path) {
+  const base = String(CONFIG.serverUrl || '').replace(/\/$/, '')
+  return `${base}${path}`
+}
+
+function apiHeaders(extra) {
+  const headers = { ...(extra || {}) }
+  if (CONFIG.apiKey) {
+    headers.Authorization = `Bearer ${CONFIG.apiKey}`
+  }
+  return headers
+}
 
 // ============================================================
 // DOM
@@ -37,6 +62,7 @@ const elements = {
   settingsClose: $('#settings-close'),
   streakBtn: $('#streak-btn'),
   serverUrl: $('#server-url'),
+  apiKey: $('#api-key'),
   modelSelect: $('#model-select'),
   themeSelect: $('#theme-select'),
   modelLabel: $('#model-label'),
@@ -95,21 +121,34 @@ async function sendMessage(text) {
   isStreaming = true;
 
   try {
-    const response = await fetch(`${CONFIG.serverUrl}/api/chat`, {
+    const response = await fetch(apiUrl('/api/chat'), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: apiHeaders({
+        'Content-Type': 'application/json',
+        'X-Hermes-Session-Id': conversationId,
+      }),
       body: JSON.stringify({
         message: text,
         conversation_id: conversationId,
-        model: CONFIG.model,
+        model: CONFIG.model || undefined,
       }),
     });
 
     typingEl.remove();
 
     if (!response.ok) {
-      throw new Error(`Server returned ${response.status}`);
+      let detail = `Server returned ${response.status}`
+      try {
+        const errBody = await response.json()
+        detail = errBody.error?.message || errBody.error || errBody.message || detail
+      } catch {
+        /* keep status text */
+      }
+      throw new Error(detail)
     }
+
+    const rotated = response.headers.get('X-Hermes-Session-Id')
+    if (rotated) conversationId = rotated
 
     // Check if streaming (SSE)
     const contentType = response.headers.get('content-type') || '';
@@ -117,7 +156,7 @@ async function sendMessage(text) {
       await handleStream(response);
     } else {
       const data = await response.json();
-      const reply = data.response || data.message || data.content || JSON.stringify(data);
+      const reply = extractReply(data);
       appendMessage('assistant', reply);
     }
 
@@ -171,6 +210,18 @@ async function handleStream(response) {
       }
     }
   }
+}
+
+function extractReply(data) {
+  if (data == null) return ''
+  if (typeof data.response === 'string' && data.response) return data.response
+  if (typeof data.message === 'string' && data.message) return data.message
+  if (data.message && typeof data.message.content === 'string') return data.message.content
+  if (typeof data.content === 'string' && data.content) return data.content
+  if (data.choices && data.choices[0] && data.choices[0].message) {
+    return data.choices[0].message.content || ''
+  }
+  return JSON.stringify(data)
 }
 
 function appendMessage(role, text) {
@@ -231,6 +282,7 @@ $$('.quick-btn').forEach((btn) => {
 elements.settingsBtn.addEventListener('click', () => {
   elements.settingsModal.style.display = 'flex';
   elements.serverUrl.value = CONFIG.serverUrl;
+  if (elements.apiKey) elements.apiKey.value = CONFIG.apiKey;
   elements.modelSelect.value = CONFIG.model;
   elements.themeSelect.value = CONFIG.theme;
 });
@@ -250,6 +302,13 @@ elements.serverUrl.addEventListener('change', () => {
   CONFIG.serverUrl = elements.serverUrl.value;
   localStorage.setItem('hermes-server-url', CONFIG.serverUrl);
 });
+
+if (elements.apiKey) {
+  elements.apiKey.addEventListener('change', () => {
+    CONFIG.apiKey = elements.apiKey.value.trim();
+    localStorage.setItem('hermes-api-key', CONFIG.apiKey);
+  });
+}
 
 elements.modelSelect.addEventListener('change', () => {
   CONFIG.model = elements.modelSelect.value;
@@ -276,7 +335,7 @@ elements.streakBtn.addEventListener('click', () => {
 
 async function loadStreak() {
   try {
-    const res = await fetch(`${CONFIG.serverUrl}/api/panels/streaks`);
+    const res = await fetch(apiUrl('/api/panels/streaks'), { headers: apiHeaders() });
     if (res.ok) {
       const data = await res.json();
       const streak = data.streak || {};
@@ -291,7 +350,7 @@ async function loadStreak() {
 
 async function recordStreak() {
   try {
-    await fetch(`${CONFIG.serverUrl}/api/panels/streaks/record`, { method: 'POST' });
+    await fetch(apiUrl('/api/panels/streaks/record'), { method: 'POST', headers: apiHeaders() });
   } catch {
     // Silently fail
   }
@@ -310,6 +369,21 @@ window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () 
 // ============================================================
 
 elements.input.focus();
+
+async function probeGateway() {
+  try {
+    const res = await fetch(apiUrl('/health'))
+    if (res.ok) {
+      elements.modelLabel.textContent = `${CONFIG.model || 'hermes × aizen'} · online`
+      return
+    }
+  } catch {
+    /* fall through */
+  }
+  elements.modelLabel.textContent = 'offline — set Server URL in settings'
+}
+
+probeGateway()
 
 // Initial streak load (background)
 setTimeout(loadStreak, 1000);

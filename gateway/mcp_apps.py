@@ -68,6 +68,20 @@ class MCPAppRegistry:
     def list_apps(cls) -> List[str]:
         return list(cls._apps.keys())
 
+    @classmethod
+    def describe_apps(cls) -> List[Dict[str, Any]]:
+        """Catalog entries for GET /api/mcp/apps (id + built metadata)."""
+        payloads: List[Dict[str, Any]] = []
+        for name in cls.list_apps():
+            built = cls.build(name)
+            if built is None:
+                payloads.append({"id": name, "name": name, "description": ""})
+                continue
+            msg = built.to_message()
+            msg["id"] = name
+            payloads.append(msg)
+        return payloads
+
 
 # ---- Built-in Apps ----
 

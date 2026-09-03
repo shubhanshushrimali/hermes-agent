@@ -14,6 +14,7 @@ Exposes an HTTP server with endpoints:
 - GET  /api/sessions/{session_id}/messages — read session message history
 - POST /api/sessions/{session_id}/fork — branch a session using SessionDB lineage
 - POST /api/sessions/{session_id}/chat[/stream] — chat with a persisted session
+- POST /api/chat                   — PWA/simple adapter: get-or-create a session, then one agent turn
 - POST /v1/runs                    — start a run, returns run_id immediately (202)
 - GET  /v1/runs/{run_id}           — retrieve current run status
 - GET  /v1/runs/{run_id}/events    — SSE stream of structured lifecycle events
@@ -2221,6 +2222,7 @@ class APIServerAdapter(BasePlatformAdapter):
             ("GET", "/health", self._handle_health),
             ("GET", "/health/detailed", self._handle_health_detailed),
             ("GET", "/v1/health", self._handle_health),
+            ("GET", "/api/health", self._handle_health),
             ("GET", "/v1/models", self._handle_models),
             ("GET", "/api/model/options", self._handle_model_options),
             ("GET", "/v1/capabilities", self._handle_capabilities),
@@ -2248,6 +2250,7 @@ class APIServerAdapter(BasePlatformAdapter):
             ("POST", "/api/sessions/{session_id}/chat", self._handle_session_chat),
             ("POST", "/api/sessions/{session_id}/chat/stream", self._handle_session_chat_stream),
             ("POST", "/api/sessions/{session_id}/model", self._handle_session_model_lock),
+            ("POST", "/api/chat", self._handle_simple_chat),
             ("POST", "/v1/chat/completions", self._handle_chat_completions),
             ("POST", "/v1/responses", self._handle_responses),
             ("GET", "/v1/responses/{response_id}", self._handle_get_response),
@@ -2286,11 +2289,12 @@ class APIServerAdapter(BasePlatformAdapter):
 
         # Graph engine status endpoint.
         routes.append(("GET", "/api/graph/status", self._handle_graph_status))
+        routes.append(("POST", "/api/graph/index", self._handle_graph_index))
 
         return routes
 
     async def _handle_graph_status(self, request):
-        """Health check for the graph engine, LiteLLM, and Langfuse."""
+        """Health check for the graph engine plus optional workspace index."""
         from aiohttp import web
         status = {"graph_engine": False, "litellm": False, "langfuse": False}
         try:
@@ -2307,7 +2311,41 @@ class APIServerAdapter(BasePlatformAdapter):
             status["daily_spend_usd"] = budget.daily_spend
         except Exception:
             pass
+        workspace = (request.query.get("workspace") or request.query.get("cwd") or "").strip()
+        if workspace:
+            try:
+                from gateway.codebase_graph import get_graph_manager
+                status["workspace"] = get_graph_manager().graph_status(workspace)
+            except Exception as exc:
+                status["workspace"] = {"indexed": False, "error": str(exc)}
         return web.json_response(status)
+
+    async def _handle_graph_index(self, request):
+        """POST /api/graph/index — Index a workspace (desktop composer chip)."""
+        from aiohttp import web
+        try:
+            data = await request.json()
+        except Exception:
+            data = {}
+        workspace_path = str((data or {}).get("workspace_path") or (data or {}).get("workspace") or "").strip()
+        force = bool((data or {}).get("force", False))
+        if not workspace_path:
+            return web.json_response({"error": "workspace_path required"}, status=400)
+        try:
+            from gateway.codebase_graph import get_graph_manager
+            graph = get_graph_manager().index_workspace(workspace_path, force=force)
+            return web.json_response({
+                "status": "indexed",
+                "workspace": workspace_path,
+                "nodes": graph.node_count,
+                "edges": graph.edge_count,
+                "files": graph.file_count,
+                "languages": graph.language_stats,
+                "backend": getattr(graph, "backend", "regex"),
+                "warnings": list(getattr(graph, "warnings", []) or []),
+            })
+        except Exception as exc:
+            return web.json_response({"error": str(exc)}, status=500)
 
     # ------------------------------------------------------------------
     # Session header helpers
@@ -2772,7 +2810,7 @@ class APIServerAdapter(BasePlatformAdapter):
     @staticmethod
     def _normalize_session_source(value: Any) -> str:
         text = str(value or "").strip().lower()
-        allowed = {"api_server", "hermes_browser", "browser", "cli", "telegram", "discord", "slack", "desktop", "dashboard"}
+        allowed = {"api_server", "hermes_browser", "browser", "cli", "telegram", "discord", "slack", "desktop", "dashboard", "pwa"}
         if text in allowed:
             return "hermes_browser" if text == "browser" else text
         return "api_server"
@@ -3451,6 +3489,7 @@ class APIServerAdapter(BasePlatformAdapter):
                 "session_chat": {"method": "POST", "path": "/api/sessions/{session_id}/chat"},
                 "session_chat_stream": {"method": "POST", "path": "/api/sessions/{session_id}/chat/stream"},
                 "session_model_lock": {"method": "POST", "path": "/api/sessions/{session_id}/model"},
+                "simple_chat": {"method": "POST", "path": "/api/chat"},
                 "browser_control_register": {"method": "POST", "path": "/v1/browser-control/register"},
                 "browser_control_ws": {"method": "GET", "path": "/v1/browser-control/ws"},
                 "artifact_upload": {"method": "POST", "path": "/v1/artifacts/upload"},
@@ -4630,22 +4669,98 @@ class APIServerAdapter(BasePlatformAdapter):
         fork = await asyncio.to_thread(db.get_session, fork_id) or {"id": fork_id, "parent_session_id": source_id}
         return web.json_response({"object": "hermes.session", "session": self._session_response(fork)}, status=201)
 
-    @_admit_api_agent_request
-    async def _handle_session_chat(self, request: "web.Request") -> "web.Response":
-        """POST /api/sessions/{session_id}/chat — one synchronous agent turn."""
-        gateway_session_key, key_err = self._parse_session_key_header(request)
-        if key_err is not None:
-            return key_err
-        session_id = request.match_info["session_id"]
+    async def _get_or_create_simple_chat_session(
+        self, session_id: str, body: Dict[str, Any]
+    ) -> tuple[Optional[Dict[str, Any]], Optional["web.Response"]]:
+        """Return an existing session, or insert a PWA/simple-chat row.
+
+        Concurrent first messages for the same conversation_id serialize on
+        the SessionDB write lock: the loser sees ``exists`` and loads the
+        winner's row instead of 409ing the chat.
+        """
+        from gateway.session import _is_path_unsafe
+
+        if not session_id or re.search(r"[\r\n\x00]", session_id) or _is_path_unsafe(session_id):
+            return None, web.json_response(_openai_error("Invalid session ID", code="invalid_session_id"), status=400)
+        if len(session_id) > self._MAX_SESSION_HEADER_LEN:
+            return None, web.json_response(_openai_error("Session ID too long", code="invalid_session_id"), status=400)
+
         session, err = await self._get_existing_session_or_404(session_id)
-        if err:
-            return err
-        body, err = await self._read_json_body(request)
-        if err:
-            return err
-        user_message, err = _session_chat_user_message(body)
-        if err is not None:
-            return err
+        if session is not None:
+            return session, None
+        if err is not None and err.status != 404:
+            return None, err
+
+        db = await self._ensure_session_db_async()
+        if db is None:
+            return None, web.json_response(_openai_error("Session database unavailable", code="session_db_unavailable"), status=503)
+
+        source = self._normalize_session_source(body.get("source") or "pwa")
+        runtime_request = self._session_runtime_request_from_body(body)
+        lock_error = self._runtime_lock_error(runtime_request)
+        if lock_error is not None:
+            return None, lock_error
+        requested = runtime_request.get("requested") or {}
+        model_name = self._clean_runtime_id(requested.get("model")) or None
+        model_config = None
+        if requested.get("model") or requested.get("provider"):
+            model_config = {
+                "browser_model_lock": {
+                    "provider": requested.get("provider") or "",
+                    "model": requested.get("model") or "",
+                    "model_options": runtime_request.get("model_options") or {},
+                    "route_source": runtime_request.get("route_source") or "",
+                    "confirmed": bool(runtime_request.get("require_model_lock")),
+                    "updated_at": time.time(),
+                }
+            }
+
+        def _do_create():
+            def _atomic(conn):
+                row = conn.execute(
+                    "SELECT * FROM sessions WHERE id = ?", (session_id,)
+                ).fetchone()
+                if row:
+                    return dict(row), "exists"
+                conn.execute(
+                    """INSERT INTO sessions (
+                       id, source, model, model_config, system_prompt, started_at
+                    ) VALUES (?, ?, ?, ?, ?, ?)""",
+                    (
+                        session_id,
+                        source,
+                        model_name,
+                        json.dumps(model_config) if model_config else None,
+                        None,
+                        time.time(),
+                    ),
+                )
+                session_row = conn.execute(
+                    "SELECT * FROM sessions WHERE id = ?", (session_id,)
+                ).fetchone()
+                return (dict(session_row) if session_row else {
+                    "id": session_id, "source": source, "model": model_name,
+                }), None
+            return db._execute_write(_atomic)
+
+        session, create_err = await asyncio.to_thread(_do_create)
+        if create_err and create_err != "exists":
+            return None, web.json_response(_openai_error(str(create_err), code="session_create_failed"), status=500)
+        if session:
+            return session, None
+        return await self._get_existing_session_or_404(session_id)
+
+    async def _complete_session_chat(
+        self,
+        session_id: str,
+        session: Dict[str, Any],
+        body: Dict[str, Any],
+        user_message: Any,
+        gateway_session_key: Optional[str],
+        *,
+        pwa_compat: bool = False,
+    ) -> "web.Response":
+        """Run one persisted-session agent turn. Callers already authenticated."""
         system_prompt = body.get("system_message") or body.get("instructions")
         if system_prompt is not None and not isinstance(system_prompt, str):
             return web.json_response(_openai_error("system_message must be a string", code="invalid_system_message"), status=400)
@@ -4736,15 +4851,75 @@ class APIServerAdapter(BasePlatformAdapter):
                 else ""
             ),
         )
-        return web.json_response(
-            {
-                "object": "hermes.session.chat.completion",
-                "session_id": effective_session_id or session_id,
-                "message": {"role": "assistant", "content": final_response},
-                "usage": usage,
-                "runtime": runtime,
-            },
-            headers=headers,
+        payload: Dict[str, Any] = {
+            "object": "hermes.session.chat.completion",
+            "session_id": effective_session_id or session_id,
+            "usage": usage,
+            "runtime": runtime,
+        }
+        if pwa_compat:
+            payload["response"] = final_response
+            payload["message"] = final_response
+        else:
+            payload["message"] = {"role": "assistant", "content": final_response}
+        return web.json_response(payload, headers=headers)
+
+    @_admit_api_agent_request
+    async def _handle_session_chat(self, request: "web.Request") -> "web.Response":
+        """POST /api/sessions/{session_id}/chat — one synchronous agent turn."""
+        gateway_session_key, key_err = self._parse_session_key_header(request)
+        if key_err is not None:
+            return key_err
+        session_id = request.match_info["session_id"]
+        session, err = await self._get_existing_session_or_404(session_id)
+        if err:
+            return err
+        body, err = await self._read_json_body(request)
+        if err:
+            return err
+        user_message, err = _session_chat_user_message(body)
+        if err is not None:
+            return err
+        return await self._complete_session_chat(
+            session_id,
+            session,
+            body,
+            user_message,
+            gateway_session_key,
+        )
+
+    @_admit_api_agent_request
+    async def _handle_simple_chat(self, request: "web.Request") -> "web.Response":
+        """POST /api/chat — PWA adapter over the persisted session runtime.
+
+        Accepts ``{message, conversation_id, model}``. Creates the session on
+        first use, then runs the same agent turn as
+        ``POST /api/sessions/{id}/chat``. There is no global ``gateway.agent``.
+        """
+        gateway_session_key, key_err = self._parse_session_key_header(request)
+        if key_err is not None:
+            return key_err
+        body, err = await self._read_json_body(request)
+        if err:
+            return err
+        chat_body = dict(body)
+        if not str(chat_body.get("model") or "").strip():
+            chat_body.pop("model", None)
+        user_message, err = _session_chat_user_message(chat_body)
+        if err is not None:
+            return err
+        raw_id = chat_body.get("conversation_id") or chat_body.get("session_id") or request.headers.get("X-Hermes-Session-Id")
+        session_id = str(raw_id).strip() if raw_id else f"pwa_{int(time.time())}_{uuid.uuid4().hex[:8]}"
+        session, err = await self._get_or_create_simple_chat_session(session_id, chat_body)
+        if err:
+            return err
+        return await self._complete_session_chat(
+            session_id,
+            session,
+            chat_body,
+            user_message,
+            gateway_session_key,
+            pwa_compat=True,
         )
 
     @_admit_api_agent_request
@@ -8453,11 +8628,7 @@ class APIServerAdapter(BasePlatformAdapter):
             # Registered after native routes so they never shadow upstream handlers.
             try:
                 from gateway.aizen_extensions import register_aizen_extensions
-                register_aizen_extensions(
-                    self._app,
-                    get_agent_fn=lambda: getattr(self.gateway_runner, 'agent', None)
-                        if self.gateway_runner else None,
-                )
+                register_aizen_extensions(self._app)
             except Exception as _ext_err:
                 logger.debug("Aizen extensions not registered: %s", _ext_err)
 

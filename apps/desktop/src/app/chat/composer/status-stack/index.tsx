@@ -5,6 +5,9 @@ import { useNavigate } from 'react-router'
 import { blurComposerInput } from '@/app/chat/composer/focus'
 import { AGENTS_ROUTE } from '@/app/routes'
 import { BillingBanner } from '@/components/billing-banner'
+import { GraphIndexBanner } from '@/components/graph-index-banner'
+import { SessionBusyBanner } from '@/components/session-busy-banner'
+import { SpendCapBanner } from '@/components/spend-cap-banner'
 import { composerDockCard } from '@/components/chat/composer-dock'
 import { StatusSection } from '@/components/chat/status-section'
 import { Button } from '@/components/ui/button'
@@ -26,7 +29,10 @@ import {
   stopBackgroundProcess
 } from '@/store/composer-status'
 import { refreshSessionGoal } from '@/store/goals'
+import { $graphIndex, startGraphIndexPolling } from '@/store/graph-index'
 import { $previewStatusBySession, dismissPreviewArtifact } from '@/store/preview-status'
+import { $currentCwd } from '@/store/session'
+import { $spendCap, startSpendCapPolling } from '@/store/spend-cap'
 import { $threadScrolledUp } from '@/store/thread-scroll'
 import { openSessionInNewWindow } from '@/store/windows'
 
@@ -75,6 +81,8 @@ const hasRunningTodo = (group: StatusGroup) =>
   group.type === 'todo' && group.items.some(item => item.todoStatus === 'in_progress' && item.state === 'running')
 
 interface ComposerStatusStackProps {
+  busy?: boolean
+  onSteer?: () => void
   /** The queue, built by the composer (it owns the queue's callbacks). Rendered
    *  as the last group so it stays fused to the composer like before. */
   queue: ReactNode
@@ -86,7 +94,7 @@ interface ComposerStatusStackProps {
  * every session-scoped status — subagents, background tasks, queue — grouped by
  * type and separated by light dividers. Collapses to nothing when empty.
  */
-export function ComposerStatusStack({ queue, sessionId }: ComposerStatusStackProps) {
+export function ComposerStatusStack({ busy = false, onSteer, queue, sessionId }: ComposerStatusStackProps) {
   const { t } = useI18n()
   const navigate = useNavigate()
   // Subscribe to THIS session's slice only. Both maps churn on other
@@ -99,8 +107,14 @@ export function ComposerStatusStack({ queue, sessionId }: ComposerStatusStackPro
   const previews = useSessionSlice($previewStatusBySession, sessionId)
   const scrolledUp = useStore($threadScrolledUp)
   const billing = useStore($billingBlock)
+  const spend = useStore($spendCap)
+  const graphIndex = useStore($graphIndex)
+  const cwd = useStore($currentCwd)
 
   const groups = useMemo(() => groupStatusItems(items), [items])
+
+  useEffect(() => startSpendCapPolling(), [])
+  useEffect(() => startGraphIndexPolling(cwd), [cwd])
 
   // Seed from the registry on session open; event-driven refreshes (terminal /
   // process tool completions) live in use-message-stream.
@@ -151,6 +165,18 @@ export function ComposerStatusStack({ queue, sessionId }: ComposerStatusStackPro
   const previewBlock = <div className="px-1 py-0.5">{previewRows}</div>
 
   const sections: { key: string; node: ReactNode }[] = []
+
+  if (busy) {
+    sections.push({ key: 'busy', node: <SessionBusyBanner busy onSteer={onSteer} /> })
+  }
+
+  if (spend.exhausted) {
+    sections.push({ key: 'spend', node: <SpendCapBanner /> })
+  }
+
+  if (graphIndex.visible) {
+    sections.push({ key: 'graph', node: <GraphIndexBanner /> })
+  }
 
   // Billing wall sits at the very top of the stack — it's the most important
   // thing above the composer when the account is out of credits. Rendered here

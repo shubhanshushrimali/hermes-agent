@@ -9,6 +9,8 @@
  * Part of Phase 4: IDE-Grade Code Experience.
  */
 
+import { hermesApi } from '@/hermes'
+import { focusedSessionTurnFields } from '@/lib/session-turn'
 import { $connection } from '@/store/session'
 
 // ---------------------------------------------------------------------------
@@ -104,21 +106,41 @@ export async function requestGhostCompletion(
   }
   lastRequestTime = now
 
-  // Check connection.
-  const conn = $connection.get()
-  if (!conn?.baseUrl) {
-    return { ok: false, error: 'Not connected' }
-  }
-
   try {
+    if (typeof window !== 'undefined' && window.hermesDesktop?.api) {
+      const data = await hermesApi<GhostCompletionResult>({
+        path: '/api/ide/ghost-completion',
+        method: 'POST',
+        body: {
+          prefix: request.prefix.slice(-500),
+          suffix: request.suffix.slice(0, 200),
+          filePath: request.filePath,
+          language: request.language,
+          ...focusedSessionTurnFields(),
+        },
+        timeoutMs: 8_000,
+      })
+      if (data.ok && data.completion) {
+        setCache(key, data.completion)
+        return { ok: true, completion: data.completion }
+      }
+      return { ok: false, error: data.error ?? 'No completion' }
+    }
+
+    const conn = $connection.get()
+    if (!conn?.baseUrl) {
+      return { ok: false, error: 'Not connected' }
+    }
+
     const response = await fetch(`${conn.baseUrl}/api/ide/ghost-completion`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        prefix: request.prefix.slice(-500),  // Last 500 chars for context.
-        suffix: request.suffix.slice(0, 200), // Next 200 chars.
+        prefix: request.prefix.slice(-500),
+        suffix: request.suffix.slice(0, 200),
         filePath: request.filePath,
         language: request.language,
+        ...focusedSessionTurnFields(),
       }),
       signal: AbortSignal.timeout(5_000),
     })

@@ -1,43 +1,56 @@
-# Caddyfile for Hermes Agent — Aizen Version
-# Serves the mobile PWA and proxies to the gateway and code-server
+# Hermes Agent — Aizen reverse proxy
+# Serves the mobile PWA and proxies gateway / dashboard / code-server.
+#
+# Hostnames must match docker-compose.aizen.yml service names.
+# Caddy injects API_SERVER_KEY so the PWA can call /api/* same-origin
+# without storing the gateway key in the browser.
 
 {
 	admin off
 }
 
-# Mobile PWA + Gateway proxy
-:80, :443 {
-	# Mobile PWA
-	handle /mobile* {
-		root * /srv/mobile
-		file_server
-		try_files {path} /index.html
+:80 {
+	# Gateway health (docker HEALTHCHECK and PWA probes)
+	handle /health {
+		reverse_proxy hermes-gateway:5005
+	}
+	handle /v1/health {
+		reverse_proxy hermes-gateway:5005
 	}
 
-	# Aizen avatar (shared between mobile PWA and desktop)
-	handle /aizen-avatar.jpg {
-		root * /srv/mobile
-		file_server
+	# OpenAI-compatible API + native /api/chat session adapter
+	handle /v1/* {
+		reverse_proxy hermes-gateway:5005 {
+			header_up Authorization "Bearer {$API_SERVER_KEY}"
+		}
 	}
-
-	# Gateway API proxy
 	handle /api/* {
-		reverse_proxy hermes-agent:8080
+		reverse_proxy hermes-gateway:5005 {
+			header_up Authorization "Bearer {$API_SERVER_KEY}"
+		}
 	}
-
-	# WebSocket proxy for streaming
 	handle /ws/* {
-		reverse_proxy hermes-agent:8080
+		reverse_proxy hermes-gateway:5005 {
+			header_up Authorization "Bearer {$API_SERVER_KEY}"
+		}
 	}
 
-	# code-server proxy
-	handle /code/* {
+	# Full dashboard SPA
+	handle /dashboard* {
+		uri strip_prefix /dashboard
+		reverse_proxy hermes-dashboard:9119
+	}
+
+	# VS Code in the browser
+	handle /code* {
 		uri strip_prefix /code
-		reverse_proxy code-server:8080
+		reverse_proxy hermes-code-server:8080
 	}
 
-	# Default: gateway
+	# Mobile PWA (default)
 	handle {
-		reverse_proxy hermes-agent:8080
+		root * /srv/pwa
+		try_files {path} /index.html
+		file_server
 	}
 }

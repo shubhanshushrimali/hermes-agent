@@ -9,6 +9,8 @@
   <meta name="description" content="Hermes Agent — Aizen-powered AI coding agent accessible from any device">
   <title>Hermes × Aizen</title>
   <link rel="manifest" href="/manifest.json">
+  <link rel="icon" href="/favicon.ico">
+  <link rel="apple-touch-icon" href="/icons/icon-192.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -83,7 +85,11 @@
         <div class="modal-body">
           <label class="setting-row">
             <span>Server URL</span>
-            <input type="url" id="server-url" value="http://localhost:5005" class="setting-input">
+            <input type="url" id="server-url" placeholder="same origin, or http://127.0.0.1:8642" class="setting-input">
+          </label>
+          <label class="setting-row">
+            <span>API key</span>
+            <input type="password" id="api-key" placeholder="API_SERVER_KEY (empty if Caddy injects it)" class="setting-input" autocomplete="off">
           </label>
           <label class="setting-row">
             <span>Model</span>

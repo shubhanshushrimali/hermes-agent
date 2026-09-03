@@ -17,8 +17,11 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { RefObject } from 'react'
+import { useStore } from '@nanostores/react'
 
 import { cn } from '@/lib/utils'
+import { publishEditorSnapshot } from '@/store/editor-snapshot'
+import { $verifyHint, type LspMarker, markersForFile } from '@/store/verify-hint'
 
 // Lazy type imports — the actual module is loaded dynamically.
 type Monaco = typeof import('monaco-editor')
@@ -183,6 +186,7 @@ export function MonacoEditor({
   const monacoRef = useRef<Monaco | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const verifyHint = useStore($verifyHint)
 
   // Track the latest onChange/onSave to avoid stale closures.
   const onChangeRef = useRef(onChange)
@@ -239,6 +243,34 @@ export function MonacoEditor({
         })
 
         editorRef.current = editor
+
+        let dirty = false
+        const publishSnapshot = () => {
+          const model = editor.getModel()
+          const selection = editor.getSelection()
+          const selectedText =
+            selection && !selection.isEmpty() ? model?.getValueInRange(selection) ?? '' : ''
+          publishEditorSnapshot({
+            activeFile: filePath,
+            language: model?.getLanguageId() ?? detectLanguage(filePath),
+            cursorLine: selection?.startLineNumber ?? editor.getPosition()?.lineNumber ?? null,
+            selection:
+              selection && !selection.isEmpty()
+                ? {
+                    startLine: selection.startLineNumber,
+                    endLine: selection.endLineNumber,
+                    textPreview: selectedText.slice(0, 400)
+                  }
+                : null,
+            unsaved: dirty
+          })
+        }
+        publishSnapshot()
+        editor.onDidChangeCursorSelection(() => publishSnapshot())
+        editor.onDidChangeModelContent(() => {
+          dirty = true
+          publishSnapshot()
+        })
 
         // Cmd+S / Ctrl+S to save
         editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
@@ -355,6 +387,39 @@ export function MonacoEditor({
       decorations.clear()
     }
   }, [highlightLines])
+
+  useEffect(() => {
+    const editor = editorRef.current
+    const monaco = monacoRef.current
+    const model = editor?.getModel()
+
+    if (!editor || !monaco || !model) {
+      return
+    }
+
+    const owner = 'hermes-verify-lsp'
+    const monacoSeverity: Record<LspMarker['severity'], number> = {
+      error: monaco.MarkerSeverity.Error,
+      warning: monaco.MarkerSeverity.Warning,
+      info: monaco.MarkerSeverity.Info,
+      hint: monaco.MarkerSeverity.Hint
+    }
+
+    const markers = markersForFile(verifyHint.lsp, filePath).map(marker => ({
+      startLineNumber: marker.line,
+      startColumn: marker.column,
+      endLineNumber: marker.line,
+      endColumn: marker.column + 1,
+      message: marker.message,
+      severity: monacoSeverity[marker.severity]
+    }))
+
+    monaco.editor.setModelMarkers(model, owner, markers)
+
+    return () => {
+      monaco.editor.setModelMarkers(model, owner, [])
+    }
+  }, [filePath, loading, verifyHint.lsp])
 
   // Expose imperative API
   useEffect(() => {

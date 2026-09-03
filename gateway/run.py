@@ -29269,41 +29269,35 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 # Inject codebase graph context for code/debug/refactor tasks.
                 if _intent.value in ("code", "debug", "refactor", "research"):
                     try:
-                        from gateway.codebase_graph import get_graph_manager
+                        from gateway.codebase_graph import (
+                            active_file_from_prompt,
+                            get_graph_manager,
+                        )
                         _gm = get_graph_manager()
-                        # Try to find workspace from session or config.
                         _ws = os.environ.get("HERMES_WORKSPACE", os.getcwd())
-                        _graph = _gm.get_graph(_ws)
-                        if _graph is None:
-                            # Auto-index the workspace on first code request.
-                            _graph = _gm.index_workspace(_ws)
-                        if _graph and _graph.node_count > 0:
-                            # Build smart context string.
-                            try:
-                                from gateway.smart_context import SmartContextBuilder
-                                _sc = SmartContextBuilder(workspace_path=_ws)
-                                _smart_ctx = _sc.build_context(
-                                    prompt=message,
-                                    max_tokens=2000,
-                                )
-                                if _smart_ctx:
-                                    context_prompt = (
-                                        (context_prompt or "")
-                                        + "\n\n--- Codebase Context (auto-generated) ---\n"
-                                        + _smart_ctx
-                                    )
-                            except Exception:
-                                # Fallback: just add the repo map.
-                                _map = _graph.to_context_string(max_tokens=1000)
-                                if _map:
-                                    context_prompt = (
-                                        (context_prompt or "")
-                                        + "\n\n--- Repository Map ---\n" + _map
-                                    )
+                        _active = active_file_from_prompt(message or "")
+                        _ctx, _warns, _status = _gm.graph_context_for_turn(
+                            _ws,
+                            message,
+                            active_file=_active,
+                            max_tokens=2000,
+                        )
+                        if _warns:
+                            context_prompt = (
+                                (context_prompt or "")
+                                + "\n\n--- Graph index warnings ---\n"
+                                + "\n".join(_warns)
+                            )
+                        if _ctx:
+                            context_prompt = (
+                                (context_prompt or "")
+                                + "\n\n--- Codebase Context ---\n"
+                                + _ctx
+                            )
                     except Exception:
-                        pass  # Graph not available — no problem.
+                        logger.warning("Codebase graph index/query failed", exc_info=True)
         except Exception:
-            pass  # Graph engine not available — proceed with original path.
+            logger.warning("Graph engine not available", exc_info=True)
 
         from run_agent import AIAgent
         import queue

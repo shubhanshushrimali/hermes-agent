@@ -12417,6 +12417,23 @@ def _run_prompt_submit(
         ):
             session["running"] = False
             return False
+        try:
+            from gateway.focused_session import set_focused_session
+
+            model = None
+            override = session.get("model_override")
+            if isinstance(override, dict):
+                model = str(override.get("model") or "").strip() or None
+            elif isinstance(override, str):
+                model = override.strip() or None
+            set_focused_session(
+                session_id=sid,
+                session_key=str(session.get("session_key") or sid),
+                cwd=str(session.get("cwd") or "").strip() or None,
+                model=model,
+            )
+        except Exception:
+            pass
         if image_paths is None:
             images = list(session.get("attached_images", []))
             session["attached_images"] = []

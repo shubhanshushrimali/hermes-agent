@@ -9,6 +9,8 @@
  * Part of Phase 4: IDE-Grade Code Experience.
  */
 
+import { hermesApi } from '@/hermes'
+import { focusedSessionTurnFields } from '@/lib/session-turn'
 import { $connection } from '@/store/session'
 
 export interface InlineEditRequest {
@@ -36,20 +38,38 @@ export interface InlineEditResult {
 export async function requestInlineEdit(
   request: InlineEditRequest
 ): Promise<InlineEditResult> {
-  const conn = $connection.get()
-  if (!conn?.baseUrl) {
-    return { ok: false, error: 'Not connected to gateway' }
-  }
-
+  const body = { ...request, ...focusedSessionTurnFields() }
   try {
+    if (typeof window !== 'undefined' && window.hermesDesktop?.api) {
+      const data = await hermesApi<InlineEditResult>({
+        path: '/api/ide/inline-edit',
+        method: 'POST',
+        body,
+        timeoutMs: 30_000,
+      })
+      if (data.ok && data.replacement !== undefined) {
+        return { ok: true, replacement: data.replacement }
+      }
+      return { ok: false, error: data.error ?? 'Inline edit failed' }
+    }
+
+    const conn = $connection.get()
+    if (!conn?.baseUrl) {
+      return { ok: false, error: 'Not connected to gateway' }
+    }
+
     const response = await fetch(`${conn.baseUrl}/api/ide/inline-edit`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(request),
+      body: JSON.stringify(body),
       signal: AbortSignal.timeout(30_000),
     })
 
     const data = await response.json()
+    if (response.status === 409) {
+      const detail = typeof data.detail === 'string' ? data.detail : data.error
+      return { ok: false, error: detail ?? 'Session is busy with another turn' }
+    }
 
     if (data.ok && data.replacement !== undefined) {
       return { ok: true, replacement: data.replacement }

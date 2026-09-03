@@ -469,6 +469,15 @@ async def _lifespan(app: "FastAPI"):
     # sweeping stale sessions on schedule, independent of list requests.
     auto_archive_task = asyncio.create_task(_auto_archive_ticker_loop())
 
+    mobile_server = None
+    if os.getenv("HERMES_DESKTOP") == "1" and os.getenv("HERMES_DISABLE_MOBILE") != "1":
+        try:
+            from gateway.mobile_integration import start_mobile_api
+
+            mobile_server = start_mobile_api(get_hermes_home())
+        except Exception:
+            _log.exception("Mobile API failed to start")
+
     try:
         yield
     finally:
@@ -480,6 +489,13 @@ async def _lifespan(app: "FastAPI"):
         await PTY_REGISTRY.close_all()
         if os.getenv("HERMES_DESKTOP") == "1":
             _terminate_desktop_managed_gateway()
+        if mobile_server is not None:
+            try:
+                from gateway.mobile_integration import stop_mobile_api
+
+                stop_mobile_api(mobile_server)
+            except Exception:
+                pass
 
 
 def _get_event_state(app: "FastAPI"):
@@ -3207,6 +3223,15 @@ def _git_path(path: str) -> str:
 from hermes_cli.web_routers import git as _git_routes  # noqa: E402
 
 app.include_router(_git_routes.router)
+from hermes_cli.web_routers import ide as _ide_routes  # noqa: E402
+
+app.include_router(_ide_routes.router)
+from hermes_cli.web_routers import panels as _panel_routes  # noqa: E402
+
+app.include_router(_panel_routes.router)
+from hermes_cli.web_routers import overlay as _overlay_routes  # noqa: E402
+
+app.include_router(_overlay_routes.router)
 from hermes_cli.web_routers.git import (  # noqa: E402,F401 — legacy re-exports; tests call these via web_server.<name>
     git_status_route,
     git_worktrees_route,

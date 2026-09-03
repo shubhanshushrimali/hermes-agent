@@ -8438,6 +8438,13 @@ class AIAgent:
         """
         tool_calls = assistant_message.tool_calls
 
+        try:
+            from agent.consequence_gate import capture_assistant_for_consequence_gate
+
+            capture_assistant_for_consequence_gate(self, assistant_message)
+        except Exception:
+            pass
+
         # Allow _vprint during tool execution even with stream consumers
         self._executing_tools = True
         try:

@@ -2060,6 +2060,8 @@ export interface Translations {
     previewLabel: (label: string) => string
     couldNotPreview: (label: string) => string
     removeAttachment: (label: string) => string
+    editorContext: string
+    editorContextWithFile: (file: string) => string
     dictating: string
     preparingAudio: string
     speakingResponse: string
@@ -2131,9 +2133,21 @@ export interface Translations {
     subagents: (count: number) => string
     todos: (done: number, total: number) => string
     running: string
+    running: string
     stop: string
     dismiss: string
     exit: (code: number) => string
+    sessionBusy: string
+    sessionBusyHint: string
+    sessionBusySteer: string
+    spendCap: string
+    spendCapHint: string
+    graphIndex: string
+    graphIndexHint: string
+    graphIndexMissing: string
+    graphIndexRegex: string
+    graphIndexStale: string
+    graphIndexReindex: string
     coding: {
       title: string
       noBranch: string
@@ -2178,6 +2192,7 @@ export interface Translations {
       switchTo: (branch: string) => string
       switchFailed: (branch: string) => string
       worktrees: string
+      runTests: string
     }
   }
 
@@ -2362,6 +2377,22 @@ export interface Translations {
     change: string
     startChatting: string
     docs: (provider: string) => string
+    folderTitle: string
+    folderDesc: string
+    chooseFolder: string
+    chooseModel: string
+    next: string
+    skip: string
+    modelTitle: string
+    modelDesc: string
+    needKey: string
+    firstPromptTitle: string
+    firstPromptDesc: string
+    firstPromptPlaceholder: string
+    sendFirstPrompt: string
+    stepFolder: string
+    stepModel: string
+    stepPrompt: string
   }
 
   modelPicker: {

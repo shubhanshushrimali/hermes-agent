@@ -10,6 +10,7 @@
 import { useEffect, useRef } from 'react'
 
 import { cn } from '@/lib/utils'
+import { publishLastTerminalLine } from '@/store/editor-snapshot'
 
 interface TerminalInstanceProps {
   sessionId: string
@@ -158,6 +159,7 @@ export function TerminalInstance({
         const unsubExit = pty.onExit((id, exitCode) => {
           if (id === sessionId) {
             term.write(`\r\n\x1b[90mProcess exited with code ${exitCode}\x1b[0m\r\n`)
+            publishLastTerminalLine(`exit ${exitCode}`)
           }
         })
 

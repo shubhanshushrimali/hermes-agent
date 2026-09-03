@@ -77,19 +77,9 @@ export function useDiffReview(): UseDiffReviewReturn {
     const cs = changeSets.find(c => c.id === id);
     if (!cs?.commitHash) return;
 
-    // Send git revert command to gateway.
-    try {
-      await fetch('/api/git/revert', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ commit_hash: cs.commitHash }),
-      });
-      setChangeSets(prev =>
-        prev.map(c => c.id === id ? { ...c, approved: false } : c)
-      );
-    } catch (err) {
-      console.error('Undo failed:', err);
-    }
+    // Dashboard git has no commit-revert route; overlay git must not hit
+    // Electron origin with fetch('/api/git/revert').
+    throw new Error('Commit revert is not available on the dashboard git API')
   }, [changeSets]);
 
   const history = changeSets.filter(cs => cs.approved);

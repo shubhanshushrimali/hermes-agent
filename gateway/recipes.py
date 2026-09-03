@@ -38,9 +38,12 @@ from __future__ import annotations
 import logging
 import os
 import re
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
+
+from gateway.mcp_apps import MCPAppRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -202,3 +205,93 @@ class RecipeLibrary:
             except Exception:
                 continue
         return None
+
+
+def default_recipes_dir() -> Path:
+    """Bundled recipes live at <repo>/recipes next to the gateway package."""
+    return Path(__file__).resolve().parent.parent / "recipes"
+
+
+async def execute_recipe(
+    recipe: Recipe,
+    *,
+    context: Optional[Dict[str, Any]] = None,
+    run_agent: Optional[Callable[[str], Awaitable[str]]] = None,
+    workspace: str = "",
+) -> Dict[str, Any]:
+    """Run every recipe step: shell locally, agent via session runtime, MCP via registry."""
+    runner = RecipeRunner(recipe)
+    if context:
+        runner.context.update(context)
+    cwd = str(workspace or runner.context.get("workspace") or os.getcwd())
+    runner.context["workspace"] = cwd
+    steps_out: List[Dict[str, Any]] = []
+
+    for step in recipe.steps:
+        result = await runner.run_step(step)
+        if result.get("status") == "skipped":
+            steps_out.append(result)
+            continue
+
+        if step.action == "shell":
+            cmd = result.get("command") or step.command
+            try:
+                proc = subprocess.run(
+                    cmd,
+                    shell=True,
+                    cwd=cwd,
+                    capture_output=True,
+                    text=True,
+                    timeout=step.timeout or 300,
+                )
+                output = (proc.stdout or "") + (proc.stderr or "")
+                result["output"] = output
+                result["returncode"] = proc.returncode
+                result["status"] = "ok" if proc.returncode == 0 else "error"
+                if step.output:
+                    runner.store_output(step.output, proc.stdout or "")
+            except Exception as exc:
+                result["status"] = "error"
+                result["error"] = str(exc)
+
+        elif step.action == "agent":
+            prompt = result.get("prompt") or step.prompt
+            if run_agent is None:
+                result["status"] = "error"
+                result["error"] = "No session agent runtime is wired for recipe agent steps"
+            else:
+                try:
+                    text = await run_agent(prompt)
+                    result["output"] = text
+                    result["status"] = "ok"
+                    if step.output:
+                        runner.store_output(step.output, text)
+                except Exception as exc:
+                    result["status"] = "error"
+                    result["error"] = str(exc)
+
+        elif step.action == "mcp_app":
+            app_name = result.get("app") or step.app
+            data = result.get("data") or {}
+            built = MCPAppRegistry.build(app_name, **data) if isinstance(data, dict) else MCPAppRegistry.build(app_name)
+            if built is None:
+                result["status"] = "error"
+                result["error"] = f"MCP app '{app_name}' not found"
+            else:
+                result["app_payload"] = built.to_message()
+                result["status"] = "ok"
+
+        elif step.action == "wait":
+            result["status"] = "ok"
+
+        else:
+            result["status"] = "error"
+            result["error"] = f"Unknown action: {step.action}"
+
+        steps_out.append(result)
+
+    return {
+        "name": recipe.name,
+        "steps": steps_out,
+        "context": runner.context,
+    }

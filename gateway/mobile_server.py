@@ -33,6 +33,8 @@ from urllib.parse import urlparse, parse_qs
 
 logger = logging.getLogger(__name__)
 
+_PWA_PATH = Path(__file__).with_name("mobile_pwa.html")
+
 
 class MobileRequestHandler(BaseHTTPRequestHandler):
     """HTTP request handler for mobile API endpoints."""
@@ -64,6 +66,22 @@ class MobileRequestHandler(BaseHTTPRequestHandler):
     def _send_error(self, message: str, status: int = 400) -> None:
         """Send an error JSON response."""
         self._send_json({"error": message}, status)
+
+    def _send_bytes(self, body: bytes, content_type: str, status: int = 200) -> None:
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _serve_pwa(self) -> None:
+        try:
+            body = _PWA_PATH.read_bytes()
+        except OSError:
+            self._send_error("Phone UI missing", 404)
+            return
+        self._send_bytes(body, "text/html; charset=utf-8")
 
     def _read_body(self) -> dict:
         """Read and parse JSON request body."""
@@ -110,6 +128,10 @@ class MobileRequestHandler(BaseHTTPRequestHandler):
             self._handle_auth()
         elif path == "/api/mobile/chat":
             self._handle_chat()
+        elif path == "/api/mobile/approve":
+            self._handle_approve()
+        elif path == "/api/mobile/steer":
+            self._handle_steer()
         elif path == "/api/mobile/revoke":
             self._handle_revoke()
         else:
@@ -122,10 +144,14 @@ class MobileRequestHandler(BaseHTTPRequestHandler):
             self._handle_status()
         elif path == "/api/mobile/sessions":
             self._handle_sessions()
+        elif path == "/api/mobile/pending":
+            self._handle_pending()
         elif path == "/api/mobile/qr":
             self._handle_qr()
         elif path == "/api/mobile/health":
             self._send_json({"status": "ok", "version": "aizen-1.0"})
+        elif path in ("/", "/index.html"):
+            self._serve_pwa()
         else:
             self._send_error("Not found", 404)
 
@@ -158,7 +184,11 @@ class MobileRequestHandler(BaseHTTPRequestHandler):
         # Get status from the bridge (or defaults)
         status = {}
         if self.bridge:
-            status = self.bridge.get("status", {})
+            getter = self.bridge.get("get_status")
+            if callable(getter):
+                status = getter()
+            elif isinstance(self.bridge.get("status"), dict):
+                status = self.bridge.get("status") or {}
 
         self._send_json({
             "model": status.get("model", "Unknown"),
@@ -167,6 +197,7 @@ class MobileRequestHandler(BaseHTTPRequestHandler):
             "uptime": status.get("uptime", "—"),
             "scope": session.scope,
             "connected": True,
+            "session_id": status.get("focused_session_id"),
         })
 
     def _handle_chat(self):
@@ -195,6 +226,75 @@ class MobileRequestHandler(BaseHTTPRequestHandler):
                 logger.error("Mobile chat bridge error: %s", e)
                 response = f"Bridge error: {e}"
 
+        session_id = None
+        if self.bridge and callable(self.bridge.get("get_status")):
+            try:
+                session_id = self.bridge["get_status"]().get("focused_session_id")
+            except Exception:
+                session_id = None
+        self._send_json({"response": response, "session_id": session_id})
+
+    def _handle_pending(self):
+        """GET /api/mobile/pending — pending tool approvals on the focused session."""
+        session = self._get_session()
+        if not session:
+            self._send_error("Unauthorized", 401)
+            return
+        if not self.auth.has_permission(session, "viewer"):
+            self._send_error("Insufficient permissions", 403)
+            return
+        payload = {"session_id": None, "approvals": []}
+        if self.bridge and callable(self.bridge.get("list_pending")):
+            try:
+                payload = self.bridge["list_pending"]()
+            except Exception as e:
+                logger.error("Mobile pending error: %s", e)
+                payload = {"session_id": None, "approvals": [], "error": str(e)}
+        self._send_json(payload)
+
+    def _handle_approve(self):
+        """POST /api/mobile/approve — approve or deny a pending tool."""
+        session = self._get_session()
+        if not session:
+            self._send_error("Unauthorized", 401)
+            return
+        if not self.auth.has_permission(session, "operator"):
+            self._send_error("Insufficient permissions (need operator+)", 403)
+            return
+        body = self._read_body()
+        choice = str(body.get("choice") or body.get("action") or "").strip()
+        if not choice:
+            self._send_error("choice required (approve|deny)", 400)
+            return
+        request_id = body.get("request_id")
+        result = {"ok": False, "error": "Bridge unavailable"}
+        if self.bridge and callable(self.bridge.get("resolve_approval")):
+            try:
+                result = self.bridge["resolve_approval"](choice, request_id)
+            except Exception as e:
+                result = {"ok": False, "error": str(e)}
+        self._send_json(result)
+
+    def _handle_steer(self):
+        """POST /api/mobile/steer — redirect the live turn, else send a new prompt."""
+        session = self._get_session()
+        if not session:
+            self._send_error("Unauthorized", 401)
+            return
+        if not self.auth.has_permission(session, "operator"):
+            self._send_error("Insufficient permissions (need operator+)", 403)
+            return
+        body = self._read_body()
+        text = str(body.get("text") or body.get("message") or "").strip()
+        if not text:
+            self._send_error("text required", 400)
+            return
+        response = "No bridge"
+        if self.bridge and callable(self.bridge.get("steer")):
+            try:
+                response = self.bridge["steer"](text)
+            except Exception as e:
+                response = f"Bridge error: {e}"
         self._send_json({"response": response})
 
     def _handle_sessions(self):

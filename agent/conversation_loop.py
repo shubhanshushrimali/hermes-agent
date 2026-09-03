@@ -96,6 +96,11 @@ from agent.retry_utils import (
     zai_coding_overload_retry_ceiling,
 )
 from agent.repetition_guard import is_repetition_dominated
+from agent.spend_budget import (
+    maybe_inject_spend_budget_wrapup,
+    record_turn_cost,
+    spend_or_token_budget_reason,
+)
 from agent.trajectory import has_incomplete_scratchpad
 # Bind before the turn starts so a source-tree swap cannot load a skewed
 # finalizer at turn end.
@@ -2062,6 +2067,24 @@ def run_conversation(
                     f"the review tool loop before the next provider call."
                 )
             break
+
+        _spend_reason = spend_or_token_budget_reason(agent)
+        if _spend_reason:
+            _turn_exit_reason = _spend_reason
+            if not agent.quiet_mode:
+                if _spend_reason == "token_budget_exhausted":
+                    agent._safe_print(
+                        f"\n⏹️  Token budget exhausted "
+                        f"({int(agent.session_total_tokens):,} tokens) — stopping "
+                        f"before the next provider call."
+                    )
+                else:
+                    agent._safe_print(
+                        f"\n⏹️  Spend budget exhausted "
+                        f"(${float(agent.session_estimated_cost_usd or 0):.4f} this session) "
+                        f"— stopping before the next provider call."
+                    )
+            break
         
         api_call_count += 1
         agent._api_call_count = api_call_count
@@ -2171,6 +2194,7 @@ def run_conversation(
         # result); dormant when no budget is set.
         if getattr(agent, "run_budget_seconds", None):
             _maybe_inject_run_budget_wrapup(agent, messages)
+        maybe_inject_spend_budget_wrapup(agent, messages)
 
         # Prepare messages for API call
         # If we have an ephemeral system prompt, prepend it to the messages
@@ -4344,11 +4368,14 @@ def run_conversation(
                     )
                     if cost_result.amount_usd is not None:
                         agent.session_estimated_cost_usd += float(cost_result.amount_usd)
+                        record_turn_cost(agent, cost_result.amount_usd)
                     # Add MoA advisor cost (already priced per-advisor at each
                     # advisor's own model rate) on top of the aggregator cost.
                     if _moa_ref_cost is not None:
                         try:
-                            agent.session_estimated_cost_usd += float(_moa_ref_cost)
+                            _moa_cost = float(_moa_ref_cost)
+                            agent.session_estimated_cost_usd += _moa_cost
+                            record_turn_cost(agent, _moa_cost)
                         except (TypeError, ValueError):  # pragma: no cover - defensive
                             pass
                     agent.session_cost_status = cost_result.status

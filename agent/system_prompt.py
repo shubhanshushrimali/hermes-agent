@@ -42,6 +42,7 @@ from agent.prompt_builder import (
     USER_PROFILE_GUIDANCE,
     OPENAI_MODEL_EXECUTION_GUIDANCE,
     PARALLEL_TOOL_CALL_GUIDANCE,
+    CONSEQUENCE_GUIDANCE,
     PLATFORM_HINTS,
     SESSION_SEARCH_GUIDANCE,
     SKILLS_GUIDANCE,
@@ -486,6 +487,11 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
     # (default True) and only injected when tools are actually loaded.
     if getattr(agent, "_parallel_tool_call_guidance", True) and agent.valid_tool_names:
         stable_parts.append(PARALLEL_TOOL_CALL_GUIDANCE)
+
+    # Consequence / responsibility steer. Default on; users who want a
+    # leaner prompt can set ``agent.consequence_guidance: false``.
+    if getattr(agent, "_consequence_guidance", True) and agent.valid_tool_names:
+        stable_parts.append(CONSEQUENCE_GUIDANCE)
 
     # Tool-aware behavioral guidance: only inject when the tools are loaded
     tool_guidance = []

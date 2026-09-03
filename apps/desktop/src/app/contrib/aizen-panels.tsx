@@ -10,10 +10,19 @@
  *  - Daemon Panel (24/7 job monitor)
  *  - Cost Dashboard (LiteLLM spend tracking)
  *  - Plan Mode overlay
+ *  - Recipes / MCP Apps / Graph (dashboard FastAPI)
  */
 
-import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { useStore } from '@nanostores/react'
+import { useCallback, useEffect, useState } from 'react'
+
+import { desktopGit } from '@/lib/desktop-git'
+import { mapRepoStatus, type GitFile } from '@/lib/git-panel'
+import { useCostDashboard, useCrewPanel, useDaemonPanel, useGraphPanel, useMcpAppsPanel, useRecipesPanel } from '@/lib/panels'
+import { focusedSessionTurnFields } from '@/lib/session-turn'
 import { cn } from '@/lib/utils'
+import { $repoStatus, $repoStatusLoading, refreshRepoStatus } from '@/store/coding-status'
+import { $currentCwd } from '@/store/session'
 
 // =============================================================================
 // Skeleton Loader — premium shimmer animation
@@ -67,75 +76,67 @@ function PanelError({ error, onRetry }: { error: string; onRetry: () => void }) 
 // Git Panel Component
 // =============================================================================
 
-interface GitFile {
-  path: string
-  status: string
-}
-
-interface GitStatus {
-  branch: string
-  ahead: number
-  behind: number
-  staged: GitFile[]
-  unstaged: GitFile[]
-  untracked: GitFile[]
-}
-
 export function GitPanel() {
-  const [status, setStatus] = useState<GitStatus | null>(null)
-  const [loading, setLoading] = useState(true)
+  const cwd = useStore($currentCwd)
+  const repo = useStore($repoStatus)
+  const loading = useStore($repoStatusLoading)
   const [error, setError] = useState('')
   const [commitMsg, setCommitMsg] = useState('')
 
-  const workspace = '' // TODO: get from $currentCwd store
-
   const refresh = useCallback(async () => {
+    setError('')
     try {
-      setLoading(true)
-      const res = await fetch(`/api/git/status?workspace=${encodeURIComponent(workspace)}`)
-      if (res.ok) setStatus(await res.json())
+      await refreshRepoStatus(cwd)
     } catch (e) {
       setError(String(e))
-    } finally {
-      setLoading(false)
     }
-  }, [workspace])
+  }, [cwd])
 
-  useEffect(() => { refresh() }, [refresh])
+  useEffect(() => {
+    void refresh()
+  }, [refresh])
 
-  if (loading) return <PanelSkeleton />
-  if (error) return <PanelError error={error} onRetry={refresh} />
-  if (!status) return <PanelSkeleton />
+  if (loading && !repo) return <PanelSkeleton />
+  if (error) return <PanelError error={error} onRetry={() => void refresh()} />
+  if (!cwd.trim()) {
+    return (
+      <div className="flex h-full items-center justify-center p-4 text-xs text-(--ui-text-quaternary)">
+        Open a workspace to see git status
+      </div>
+    )
+  }
+  if (!repo) {
+    return (
+      <div className="flex h-full items-center justify-center p-4 text-xs text-(--ui-text-quaternary)">
+        Not a git repository
+      </div>
+    )
+  }
 
+  const status = mapRepoStatus(repo)
   const total = status.staged.length + status.unstaged.length + status.untracked.length
+  const git = desktopGit()
 
   return (
     <div className="flex h-full flex-col overflow-auto text-xs">
-      {/* Branch header */}
       <div className="flex items-center gap-2 border-b border-(--ui-stroke-secondary) px-3 py-2">
-        <span className="font-mono text-(--ui-text-secondary)">⎇ {status.branch}</span>
+        <span className="font-mono text-(--ui-text-secondary)">{status.branch}</span>
         {status.ahead > 0 && <span className="text-(--aizen-gold)">↑{status.ahead}</span>}
         {status.behind > 0 && <span className="text-(--aizen-red)">↓{status.behind}</span>}
         <span className="ml-auto text-(--ui-text-quaternary)">{total} changes</span>
       </div>
 
-      {/* Staged files */}
       {status.staged.length > 0 && (
         <FileSection title="Staged" files={status.staged} color="text-green-400" />
       )}
-
-      {/* Unstaged files */}
       {status.unstaged.length > 0 && (
         <FileSection title="Modified" files={status.unstaged} color="text-yellow-400" />
       )}
-
-      {/* Untracked files */}
       {status.untracked.length > 0 && (
         <FileSection title="Untracked" files={status.untracked} color="text-blue-400" />
       )}
 
-      {/* Commit input */}
-      {status.staged.length > 0 && (
+      {status.staged.length > 0 && git?.review && (
         <div className="mt-auto border-t border-(--ui-stroke-secondary) p-2">
           <input
             className="mb-2 w-full rounded-md border border-(--ui-stroke-secondary) bg-(--ui-bg-quaternary) px-2 py-1 text-xs text-(--ui-text-secondary) outline-none focus:border-(--aizen-gold)"
@@ -144,38 +145,39 @@ export function GitPanel() {
             onChange={(e) => setCommitMsg(e.target.value)}
             onKeyDown={async (e) => {
               if (e.key === 'Enter' && commitMsg) {
-                await fetch('/api/git/commit', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ workspace, message: commitMsg }),
-                })
+                await git.review.commit(cwd, commitMsg, false)
                 setCommitMsg('')
-                refresh()
+                await refresh()
               }
             }}
           />
           <div className="flex gap-1">
             <ActionButton label="Push" onClick={async () => {
-              await fetch('/api/git/push', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ workspace }),
-              })
-              refresh()
-            }} />
-            <ActionButton label="Pull" onClick={async () => {
-              await fetch('/api/git/pull', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ workspace }),
-              })
-              refresh()
+              await git.review.push(cwd)
+              await refresh()
             }} />
           </div>
         </div>
       )}
     </div>
   )
+}
+
+function fileStatusLetter(status: GitFile['status']): string {
+  switch (status) {
+    case 'added':
+      return 'A'
+    case 'modified':
+      return 'M'
+    case 'deleted':
+      return 'D'
+    case 'renamed':
+      return 'R'
+    default: {
+      const _exhaustive: never = status
+      return _exhaustive
+    }
+  }
 }
 
 function FileSection({ title, files, color }: { title: string; files: GitFile[]; color: string }) {
@@ -187,7 +189,7 @@ function FileSection({ title, files, color }: { title: string; files: GitFile[];
       {files.map((f) => (
         <div key={f.path} className="flex items-center gap-1.5 py-0.5">
           <span className={cn('font-mono text-[0.6rem]', color)}>
-            {f.status === 'added' ? 'A' : f.status === 'modified' ? 'M' : f.status === 'deleted' ? 'D' : '?'}
+            {fileStatusLetter(f.status)}
           </span>
           <span className="truncate text-(--ui-text-tertiary)">{f.path.split(/[\\/]/).pop()}</span>
         </div>
@@ -212,22 +214,9 @@ function ActionButton({ label, onClick }: { label: string; onClick: () => void }
 // =============================================================================
 
 export function CrewPanel() {
-  const [status, setStatus] = useState<any>(null)
-  const [loading, setLoading] = useState(true)
+  const { status, isLoading } = useCrewPanel()
 
-  const refresh = useCallback(async () => {
-    try {
-      setLoading(true)
-      const res = await fetch('/api/crew/status')
-      if (res.ok) setStatus(await res.json())
-    } catch { /* ignore */ } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { refresh() }, [refresh])
-
-  if (loading) return <PanelSkeleton />
+  if (isLoading && !status) return <PanelSkeleton />
 
   const crews = status?.available_crews || {}
   const activeCrew = status?.active_crew
@@ -252,7 +241,7 @@ export function CrewPanel() {
           <div className="mb-1.5 text-[0.6rem] font-medium uppercase tracking-wider text-(--ui-text-quaternary)">
             Active Agents
           </div>
-          {agents.map((agent: string) => (
+          {agents.map((agent) => (
             <div key={agent} className="flex items-center gap-2 py-1">
               <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-green-400" />
               <span className="text-(--ui-text-secondary)">{agent}</span>
@@ -266,7 +255,7 @@ export function CrewPanel() {
         <div className="mb-1.5 text-[0.6rem] font-medium uppercase tracking-wider text-(--ui-text-quaternary)">
           Available Crews
         </div>
-        {Object.entries(crews).map(([name, crew]: [string, any]) => (
+        {Object.entries(crews).map(([name, crew]) => (
           <div key={name} className="mb-2 rounded-md border border-(--ui-stroke-secondary) p-2">
             <div className="mb-1 font-medium text-(--ui-text-secondary)">{crew.name || name}</div>
             <div className="text-[0.6rem] text-(--ui-text-quaternary)">
@@ -284,33 +273,9 @@ export function CrewPanel() {
 // =============================================================================
 
 export function DaemonPanel() {
-  const [health, setHealth] = useState<any>(null)
-  const [jobs, setJobs] = useState<any[]>([])
-  const [loading, setLoading] = useState(true)
+  const { health, jobs, isRunning, isLoading } = useDaemonPanel()
 
-  const refresh = useCallback(async () => {
-    try {
-      setLoading(true)
-      const [h, j] = await Promise.all([
-        fetch('/api/daemon/health').then(r => r.ok ? r.json() : null),
-        fetch('/api/daemon/jobs').then(r => r.ok ? r.json() : { jobs: [] }),
-      ])
-      setHealth(h)
-      setJobs(j?.jobs || [])
-    } catch { /* ignore */ } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    refresh()
-    const interval = setInterval(refresh, 30000)
-    return () => clearInterval(interval)
-  }, [refresh])
-
-  if (loading) return <PanelSkeleton />
-
-  const isRunning = health?.status === 'running'
+  if (isLoading && !health) return <PanelSkeleton />
 
   return (
     <div className="flex h-full flex-col overflow-auto text-xs">
@@ -382,17 +347,9 @@ function StatChip({ label, value }: { label: string; value: string | number }) {
 // =============================================================================
 
 export function CostPanel() {
-  const [data, setData] = useState<any>(null)
-  const [loading, setLoading] = useState(true)
+  const { data, isLoading } = useCostDashboard()
 
-  useEffect(() => {
-    fetch('/api/cost/dashboard')
-      .then(r => r.ok ? r.json() : null)
-      .then(setData)
-      .finally(() => setLoading(false))
-  }, [])
-
-  if (loading) return <PanelSkeleton />
+  if (isLoading && !data) return <PanelSkeleton />
 
   return (
     <div className="flex h-full flex-col overflow-auto text-xs">
@@ -410,10 +367,10 @@ export function CostPanel() {
           <div className="mb-1.5 text-[0.6rem] font-medium uppercase tracking-wider text-(--ui-text-quaternary)">
             By Model
           </div>
-          {Object.entries(data.by_model).map(([model, cost]: [string, any]) => (
+          {Object.entries(data.by_model).map(([model, cost]) => (
             <div key={model} className="flex justify-between py-0.5">
               <span className="truncate text-(--ui-text-tertiary)">{model}</span>
-              <span className="font-mono text-(--ui-text-secondary)">${cost.toFixed(3)}</span>
+              <span className="font-mono text-(--ui-text-secondary)">${Number(cost).toFixed(3)}</span>
             </div>
           ))}
         </div>
@@ -483,6 +440,129 @@ export function PlanPanel() {
           </span>
         </div>
       ))}
+    </div>
+  )
+}
+
+// =============================================================================
+// Recipes / MCP Apps / Graph — dashboard FastAPI, not the aiohttp overlay
+// =============================================================================
+
+export function RecipesPanel() {
+  const { recipes, isLoading, running, lastResult, error, refresh, runRecipe } = useRecipesPanel()
+
+  if (isLoading && recipes.length === 0) return <PanelSkeleton />
+  if (error) return <PanelError error={error} onRetry={() => void refresh()} />
+
+  return (
+    <div className="flex h-full flex-col overflow-auto text-xs">
+      <div className="flex items-center gap-2 border-b border-(--ui-stroke-secondary) px-3 py-2">
+        <span className="text-(--ui-text-secondary)">Recipes</span>
+        <span className="ml-auto text-(--ui-text-quaternary)">{recipes.length}</span>
+      </div>
+      <div className="flex-1 overflow-auto px-3 py-2">
+        {recipes.length === 0 && (
+          <div className="py-4 text-center text-(--ui-text-quaternary)">No recipes bundled</div>
+        )}
+        {recipes.map((recipe) => (
+          <div key={recipe.name} className="mb-1.5 rounded-md border border-(--ui-stroke-secondary) p-2">
+            <div className="flex items-center gap-2">
+              <span className="font-medium text-(--ui-text-secondary)">{recipe.name}</span>
+              <button
+                className="ml-auto rounded-md bg-(--ui-bg-quaternary) px-2 py-0.5 text-[0.6rem] text-(--ui-text-secondary) hover:bg-(--ui-bg-tertiary) disabled:opacity-50"
+                disabled={running === recipe.name}
+                onClick={() => void runRecipe(recipe.name, focusedSessionTurnFields())}
+              >
+                {running === recipe.name ? 'Running…' : 'Run'}
+              </button>
+            </div>
+            {recipe.description && (
+              <div className="mt-0.5 text-[0.6rem] text-(--ui-text-quaternary)">{recipe.description}</div>
+            )}
+          </div>
+        ))}
+      </div>
+      {lastResult && (
+        <pre className="max-h-32 overflow-auto border-t border-(--ui-stroke-secondary) p-2 font-mono text-[0.6rem] text-(--ui-text-tertiary)">
+          {lastResult}
+        </pre>
+      )}
+    </div>
+  )
+}
+
+export function McpAppsPanel() {
+  const { apps, isLoading, error, refresh } = useMcpAppsPanel()
+
+  if (isLoading && apps.length === 0) return <PanelSkeleton />
+  if (error) return <PanelError error={error} onRetry={() => void refresh()} />
+
+  return (
+    <div className="flex h-full flex-col overflow-auto text-xs">
+      <div className="flex items-center gap-2 border-b border-(--ui-stroke-secondary) px-3 py-2">
+        <span className="text-(--ui-text-secondary)">MCP Apps</span>
+        <span className="ml-auto text-(--ui-text-quaternary)">{apps.length}</span>
+      </div>
+      <div className="flex-1 overflow-auto px-3 py-2">
+        {apps.length === 0 && (
+          <div className="py-4 text-center text-(--ui-text-quaternary)">No MCP apps registered</div>
+        )}
+        {apps.map((app) => (
+          <div key={app.id} className="mb-1.5 rounded-md border border-(--ui-stroke-secondary) p-2">
+            <div className="font-medium text-(--ui-text-secondary)">{app.name || app.id}</div>
+            {app.description && (
+              <div className="mt-0.5 text-[0.6rem] text-(--ui-text-quaternary)">{app.description}</div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+export function GraphPanel() {
+  const cwd = useStore($currentCwd)
+  const { result, isLoading, error, indexWorkspace } = useGraphPanel(cwd)
+  const warnings = result?.warnings ?? []
+
+  return (
+    <div className="flex h-full flex-col overflow-auto text-xs">
+      <div className="flex items-center gap-2 border-b border-(--ui-stroke-secondary) px-3 py-2">
+        <span className="text-(--ui-text-secondary)">Graph</span>
+        {result?.backend && (
+          <span className="ml-auto text-(--ui-text-quaternary)">{result.backend}</span>
+        )}
+      </div>
+      <div className="p-3">
+        <button
+          className="w-full rounded-md bg-(--ui-bg-quaternary) py-1.5 text-[0.65rem] text-(--ui-text-secondary) hover:bg-(--ui-bg-tertiary) disabled:opacity-50"
+          disabled={isLoading || !cwd.trim()}
+          onClick={() => void indexWorkspace(true)}
+        >
+          {isLoading ? 'Indexing…' : 'Index workspace'}
+        </button>
+      </div>
+      {error && <PanelError error={error} onRetry={() => void indexWorkspace(true)} />}
+      {result && (
+        <div className="grid grid-cols-3 gap-2 px-3">
+          <StatChip label="Nodes" value={result.nodes ?? 0} />
+          <StatChip label="Edges" value={result.edges ?? 0} />
+          <StatChip label="Files" value={result.files ?? 0} />
+        </div>
+      )}
+      {warnings.length > 0 && (
+        <div className="px-3 py-2">
+          <div className="mb-1 text-[0.6rem] font-medium uppercase tracking-wider text-yellow-400">
+            Index warnings
+          </div>
+          {warnings.map((w) => (
+            <div key={w} className="mb-1 text-[0.6rem] text-yellow-400/90">{w}</div>
+          ))}
+        </div>
+      )}
+      {!cwd.trim() && (
+        <div className="px-3 py-2 text-(--ui-text-quaternary)">Open a workspace to index</div>
+      )}
     </div>
   )
 }

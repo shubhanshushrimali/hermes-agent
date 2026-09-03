@@ -509,6 +509,22 @@ PARALLEL_TOOL_CALL_GUIDANCE = (
     "in doubt and the calls are independent, batch them."
 )
 
+# Consequence / responsibility steer — cache-stable, short on purpose.
+# Models will execute first and narrate later unless told to name blast
+# radius before mutating tools. Token discipline is folded in here so we
+# don't pay a second prompt block for "don't dump whole files".
+CONSEQUENCE_GUIDANCE = (
+    "# Consequences before action\n"
+    "Before a mutating tool call (terminal, write_file, patch, browser, "
+    "send_message, cronjob), state the blast radius in one line: what "
+    "changes, who it affects, and whether it is reversible. If it is "
+    "irreversible, high-cost, or outside the user's stated scope, stop "
+    "and ask. Prefer the smallest safe step — dry-run or read first when "
+    "a command can delete, force-push, drop data, spend money, or message "
+    "people. Do not dump whole files into context; read the smallest slice "
+    "that answers the question."
+)
+
 # OpenAI GPT/Codex-specific execution guidance.  Addresses known failure modes
 # where GPT models abandon work on partial results, skip prerequisite lookups,
 # hallucinate instead of using tools, and declare "done" without verification.

@@ -15,6 +15,7 @@ def _make_agent(**overrides):
         skip_context_files=False,
         valid_tool_names=[],
         _task_completion_guidance=False,
+        _consequence_guidance=False,
         _tool_use_enforcement=False,
         _environment_probe=False,
         _kanban_worker_guidance="",
@@ -264,6 +265,28 @@ class TestNamedProfileHintIntegration:
         assert f"under {root}/profiles/<name>/." in prompt
 
 
+def test_consequence_guidance_injected_when_tools_loaded():
+    from agent.prompt_builder import CONSEQUENCE_GUIDANCE
+
+    agent = _make_agent(
+        valid_tool_names=["terminal", "write_file"],
+        _consequence_guidance=True,
+    )
+    stable = _stable_prompt(agent)
+    assert CONSEQUENCE_GUIDANCE in stable
+
+
+def test_consequence_guidance_off_when_disabled():
+    from agent.prompt_builder import CONSEQUENCE_GUIDANCE
+
+    agent = _make_agent(
+        valid_tool_names=["terminal"],
+        _consequence_guidance=False,
+    )
+    stable = _stable_prompt(agent)
+    assert CONSEQUENCE_GUIDANCE not in stable
+
+
 def test_build_system_prompt_records_stable_prefix():
     agent = _make_agent()
     with (
@@ -284,6 +307,7 @@ def test_coding_prompt_preserves_legacy_workspace_order(monkeypatch):
     agent = _make_agent(
         valid_tool_names=["read_file"],
         _parallel_tool_call_guidance=False,
+        _consequence_guidance=False,
     )
     monkeypatch.setattr(system_prompt, "DEFAULT_AGENT_IDENTITY", "IDENTITY")
     monkeypatch.setattr(system_prompt, "HERMES_AGENT_HELP_GUIDANCE", "HELP")
@@ -602,6 +626,7 @@ def test_conversation_start_uses_session_start_not_build_time(monkeypatch):
     agent = _make_agent(
         valid_tool_names=["read_file"],
         _parallel_tool_call_guidance=False,
+        _consequence_guidance=False,
         session_id="20260101_120000_abc123",
     )
     monkeypatch.setattr(system_prompt, "DEFAULT_AGENT_IDENTITY", "IDENTITY")

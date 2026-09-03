@@ -321,9 +321,10 @@ def register_panel_routes(app: Any) -> None:
             return web.json_response({
                 "total_today_usd": budget.daily_spend,
                 "budget_remaining_usd": budget.remaining_budget,
-                "by_model": {},  # TODO: per-model breakdown
-                "by_intent": {},
-                "last_7_days": [],
+                "max_daily_usd": budget.max_daily_usd,
+                "by_model": budget.by_model,
+                "by_intent": budget.by_intent,
+                "last_7_days": budget.last_7_days,
             })
         except Exception:
             return web.json_response({
@@ -349,7 +350,7 @@ def register_panel_routes(app: Any) -> None:
     # ================================================================
 
     try:
-        from gateway.ws_hub import wrap_panel_route_with_broadcast, get_hub
+        from gateway.ws_hub import OVERLAY_WS_STATS_PATH, wrap_panel_route_with_broadcast, get_hub
 
         # After git mutations (stage, commit, push, pull, revert),
         # auto-broadcast the new git status to all WebSocket clients.
@@ -388,8 +389,26 @@ def register_panel_routes(app: Any) -> None:
             hub = get_hub()
             return web.json_response(hub.get_stats())
 
-        app.router.add_get("/api/ws/stats", handle_ws_stats)
+        app.router.add_get(OVERLAY_WS_STATS_PATH, handle_ws_stats)
     except ImportError:
         pass
 
-    logger.info("Panel routes registered: git, crew, daemon, cost, ws")
+    async def handle_streaks(_request):
+        try:
+            from gateway.streaks import get_streak_api_data
+            return web.json_response(get_streak_api_data())
+        except Exception as e:
+            return web.json_response({"status": "error", "error": str(e)}, status=500)
+
+    async def handle_streaks_record(_request):
+        try:
+            from gateway.streaks import StreakTracker
+            info = StreakTracker().record_activity()
+            return web.json_response({"ok": True, "streak": info})
+        except Exception as e:
+            return web.json_response({"ok": False, "error": str(e)}, status=500)
+
+    app.router.add_get("/api/panels/streaks", handle_streaks)
+    app.router.add_post("/api/panels/streaks/record", handle_streaks_record)
+
+    logger.info("Panel routes registered: git, crew, daemon, cost, ws, streaks")

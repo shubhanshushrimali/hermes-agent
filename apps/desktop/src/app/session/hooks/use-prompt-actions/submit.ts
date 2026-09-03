@@ -18,6 +18,7 @@ import {
   mainComposerScope,
   terminalContextBlocksFromDraft
 } from '@/store/composer'
+import { formatEditorSnapshotSidecar } from '@/store/editor-snapshot'
 import { $hudMode } from '@/store/hud'
 import { clearNotifications, notify, notifyError } from '@/store/notifications'
 import { consumePendingCredentialWarning, requestDesktopOnboarding } from '@/store/onboarding'
@@ -133,6 +134,7 @@ export function useSubmitPrompt(deps: SubmitPromptDeps) {
       )
 
       const terminalContextBlocks = terminalContextBlocksFromDraft(rawText).join('\n\n')
+      const editorSidecar = formatEditorSnapshotSidecar()
       const hasImage = attachments.some(a => a.kind === 'image')
 
       // Refs are recomputed after sync (file.attach rewrites @file: refs to
@@ -153,7 +155,7 @@ export function useSubmitPrompt(deps: SubmitPromptDeps) {
           .join('\n')
 
         return (
-          [contextRefs, terminalContextBlocks, visibleText].filter(Boolean).join('\n\n') ||
+          [contextRefs, terminalContextBlocks, editorSidecar, visibleText].filter(Boolean).join('\n\n') ||
           (present.some(a => a.kind === 'image') ? 'What do you see in this image?' : '')
         )
       }

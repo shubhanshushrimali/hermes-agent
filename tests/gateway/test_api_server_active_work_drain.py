@@ -58,6 +58,7 @@ def _make_admission_app(adapter: APIServerAdapter) -> web.Application:
     app.router.add_post(
         "/api/sessions/{session_id}/chat/stream", adapter._handle_session_chat_stream
     )
+    app.router.add_post("/api/chat", adapter._handle_simple_chat)
     app.router.add_post("/v1/chat/completions", adapter._handle_chat_completions)
     app.router.add_post("/v1/responses", adapter._handle_responses)
     app.router.add_post("/v1/runs", adapter._handle_runs)
@@ -219,6 +220,7 @@ class TestDrainAdmission:
         paths = (
             "/api/sessions/missing/chat",
             "/api/sessions/missing/chat/stream",
+            "/api/chat",
             "/v1/chat/completions",
             "/v1/responses",
             "/v1/runs",
